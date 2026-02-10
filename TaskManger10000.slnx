@@ -1,3 +1,5 @@
 <Solution>
-  <Project Path="src/src.csproj" />
+  <Project Path="src/src.csproj">
+    <BuildType Project="Release" />
+  </Project>
 </Solution>

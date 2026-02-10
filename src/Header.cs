@@ -7,7 +7,6 @@ public enum SortMode
 {
     MemoryDesc,
     NameAsc,
-    PidAsc,
     None
 }
 
@@ -20,7 +19,6 @@ public sealed class Header(string text, SortMode type) : IRenderable
     {
         SortMode.MemoryDesc => new Style(Color.White, Color.Green),
         SortMode.NameAsc => new Style(Color.White, Color.Blue),
-        SortMode.PidAsc => new Style(Color.White, Color.Yellow),
         SortMode.None => new Style(Color.White, Color.Grey),
         _ => new Style(Color.White, Color.Grey),
     };
