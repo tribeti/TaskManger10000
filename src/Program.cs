@@ -40,7 +40,7 @@ class Program
             .RoundedBorder()
             .Expand()
             .ShowRowSeparators();
-        
+
 
         table.AddColumn(new TableColumn(new Header("Name", SortMode.None)));
         table.AddColumn(new TableColumn(new Header("Memory (MB)", SortMode.None)).RightAligned());
@@ -141,7 +141,7 @@ class Program
                           }
                           else if (key == ConsoleKey.Q)
                           {
-                              Environment.Exit(0);
+                              return;
                           }
                       }
                   }
@@ -179,7 +179,7 @@ class Program
                       {
                           table.AddRow(
                               $"[black on white]{name}[/]",
-                              $"[black on white]{memVal:N2}[/]"
+                              $"[black on white]{mem}[/]"
                           );
                       }
                       else
