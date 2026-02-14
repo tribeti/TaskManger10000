@@ -1,219 +1,389 @@
 ﻿using Spectre.Console;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace src;
 
-class Program
+// ── Win32 interop để lấy tổng RAM vật lý ──────────────────────────────────
+static class NativeMemory
 {
-    static void Main()
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private class MEMORYSTATUSEX
     {
-        int pageSize = 10;
-        int selectedIndex = 0;
-        int scrollOffset = 0;
-        DateTime lastDataRefresh = DateTime.MinValue;
-        List<Process> currentProcessList = [];
-        SortMode currentSortMode = SortMode.MemoryDesc;
-        string searchQuery = "";
-        bool searchMode = false;
-
-        // header
-        var title = new FigletText("Task Manager")
-        {
-            Color = Color.Blue,
-            Justification = Justify.Center
-        };
-
-        AnsiConsole.Write(title);
-        AnsiConsole.WriteLine();
-
-        var instructions = new Panel(
-            "[green]K[/]: Kill Process | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Escape | [red]Q[/]: Quit"
-        )
-            .Header("Instructions", Justify.Center)
-            .HeaderAlignment(Justify.Center)
-            .Border(BoxBorder.Rounded);
-
-        AnsiConsole.Write(instructions);
-        AnsiConsole.WriteLine();
-
-        var table = new Table()
-            .RoundedBorder()
-            .Expand()
-            .ShowRowSeparators();
-
-
-        table.AddColumn(new TableColumn(new Header("Name", SortMode.None)));
-        table.AddColumn(new TableColumn(new Header("Memory (MB)", SortMode.None)).RightAligned());
-
-        AnsiConsole.Live(table)
-          .AutoClear(false)
-          .Overflow(VerticalOverflow.Ellipsis)
-          .Cropping(VerticalOverflowCropping.Bottom)
-          .Start(ctx =>
-          {
-              while (true)
-              {
-                  if ((DateTime.Now - lastDataRefresh).TotalSeconds > 1)
-                  {
-                      currentProcessList = [.. Process.GetProcesses()];
-                      ApplySorting(ref currentProcessList, currentSortMode);
-                      lastDataRefresh = DateTime.Now;
-                  }
-
-                  var filteredProcesses = string.IsNullOrEmpty(searchQuery)
-                      ? currentProcessList
-                      : [.. currentProcessList.Where(p => p.ProcessName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))];
-
-                  if (selectedIndex >= filteredProcesses.Count)
-                      selectedIndex = filteredProcesses.Count - 1;
-                  if (selectedIndex < 0)
-                      selectedIndex = 0;
-
-                  if (Console.KeyAvailable)
-                  {
-                      var keyInfo = Console.ReadKey(true);
-                      var key = keyInfo.Key;
-
-                      if (searchMode)
-                      {
-                          if (key == ConsoleKey.Escape)
-                          {
-                              searchMode = false;
-                              searchQuery = "";
-                          }
-                          else if (key == ConsoleKey.Backspace && searchQuery.Length > 0)
-                          {
-                              searchQuery = searchQuery[..^1];
-                          }
-                          else if (key == ConsoleKey.Enter)
-                          {
-                              searchMode = false;
-                          }
-                          else if (!char.IsControl(keyInfo.KeyChar))
-                          {
-                              searchQuery += keyInfo.KeyChar;
-                          }
-                      }
-                      else
-                      {
-                          if (key == ConsoleKey.UpArrow)
-                          {
-                              selectedIndex--;
-                              if (selectedIndex < 0)
-                                  selectedIndex = 0;
-                              if (selectedIndex < scrollOffset)
-                                  scrollOffset = selectedIndex;
-                          }
-                          else if (key == ConsoleKey.DownArrow)
-                          {
-                              selectedIndex++;
-                              if (selectedIndex >= filteredProcesses.Count)
-                                  selectedIndex = filteredProcesses.Count - 1;
-                              if (selectedIndex >= scrollOffset + pageSize)
-                                  scrollOffset = selectedIndex - pageSize + 1;
-                          }
-                          else if (key == ConsoleKey.K)
-                          {
-                              if (filteredProcesses.Count > 0)
-                              {
-                                  KillProcess(filteredProcesses[selectedIndex]);
-                                  Task.Delay(100).Wait();
-                                  currentProcessList = [.. Process.GetProcesses()];
-                                  ApplySorting(ref currentProcessList, currentSortMode);
-                              }
-                          }
-                          else if (key == ConsoleKey.S)
-                          {
-                              currentSortMode = currentSortMode switch
-                              {
-                                  SortMode.MemoryDesc => SortMode.NameAsc,
-                                  SortMode.NameAsc => SortMode.MemoryDesc,
-                                  _ => SortMode.MemoryDesc
-                              };
-                              ApplySorting(ref currentProcessList, currentSortMode);
-                              scrollOffset = 0;
-                              selectedIndex = 0;
-                          }
-                          else if (key == ConsoleKey.F)
-                          {
-                              searchMode = true;
-                              searchQuery = "";
-                          }
-                          else if (key == ConsoleKey.Q)
-                          {
-                              return;
-                          }
-                      }
-                  }
-
-                  table = new Table()
-                      .RoundedBorder()
-                      .Expand()
-                      .ShowRowSeparators();
-
-                  table.AddColumn(new TableColumn(new Header("Name", currentSortMode == SortMode.NameAsc ? SortMode.NameAsc : SortMode.None)));
-                  table.AddColumn(new TableColumn(new Header("Memory (MB)", currentSortMode == SortMode.MemoryDesc ? SortMode.MemoryDesc : SortMode.None)).RightAligned());
-
-                  if (searchMode || !string.IsNullOrEmpty(searchQuery))
-                  {
-                      table.Caption = new TableTitle($"[yellow]Searching: {searchQuery}{(searchMode ? "_" : "")}[/] ([dim]{filteredProcesses.Count} results[/])");
-                  }
-                  else
-                  {
-                      table.Caption = null;
-                  }
-
-                  table.Rows.Clear();
-                  var visibleProcesses = filteredProcesses.Skip(scrollOffset).Take(pageSize).ToList();
-
-                  for (int i = 0; i < visibleProcesses.Count; i++)
-                  {
-                      var p = visibleProcesses[i];
-                      int realIndex = scrollOffset + i;
-                      bool isSelected = (realIndex == selectedIndex);
-                      string name = p.ProcessName;
-                      double memVal = p.WorkingSet64 / 1024.0 / 1024.0;
-                      string mem = memVal > 500 ? $"[red]{memVal:N2}[/]" : memVal > 300 ? $"[yellow]{memVal:N2}[/]" : $"[green]{memVal:N2}[/]";
-
-                      if (isSelected)
-                      {
-                          table.AddRow(
-                              $"[black on white]{name}[/]",
-                              $"[black on white]{mem}[/]"
-                          );
-                      }
-                      else
-                      {
-                          table.AddRow(name, mem);
-                      }
-                  }
-
-                  ctx.UpdateTarget(table);
-                  Task.Delay(100).Wait();
-              }
-          });
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+        public MEMORYSTATUSEX() => dwLength = (uint) Marshal.SizeOf(typeof(MEMORYSTATUSEX));
     }
 
-    private static void ApplySorting(ref List<Process> processes, SortMode sortMode)
-    {
-        processes = sortMode switch
-        {
-            SortMode.MemoryDesc => [.. processes.OrderByDescending(p => p.WorkingSet64)],
-            SortMode.NameAsc => [.. processes.OrderBy(p => p.ProcessName)],
-            _ => processes
-        };
-    }
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
 
-    public static void KillProcess(Process p)
+    public static (double totalGB, double availGB, double usedPct) GetStatus()
     {
+        var s = new MEMORYSTATUSEX();
+        if (!GlobalMemoryStatusEx(s))
+            return (0, 0, 0);
+        double total = s.ullTotalPhys / 1024.0 / 1024 / 1024;
+        double avail = s.ullAvailPhys / 1024.0 / 1024 / 1024;
+        double pct = s.dwMemoryLoad;          // đã là 0-100
+        return (total, avail, pct);
+    }
+}
+
+// ── Metrics collector chạy nền ─────────────────────────────────────────────
+class SystemMetrics : IDisposable
+{
+    private readonly PerformanceCounter _cpuCounter;
+    private readonly PerformanceCounter _ramCounter;   // Available MBytes
+
+    // GPU: tổng hợp tất cả instances của "GPU Engine\Utilization Percentage"
+    private PerformanceCounter[]? _gpuCounters;
+
+    public float CpuPct { get; private set; }
+    public double RamUsedPct { get; private set; }
+    public double RamTotalGB { get; private set; }
+    public double RamUsedGB { get; private set; }
+    public float GpuPct { get; private set; }
+    public bool GpuAvailable { get; private set; }
+
+    public SystemMetrics()
+    {
+        _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+        _ramCounter = new PerformanceCounter("Memory", "Available MBytes");
+
+        // Warmup: lần đầu CPU counter luôn trả 0
+        _cpuCounter.NextValue();
+
+        // GPU Engine counters (Windows 10 1709+ / WDDM 2.0)
         try
         {
-            p.Kill();
-            p.WaitForExit(1000);
+            var cat = new PerformanceCounterCategory("GPU Engine");
+            var instances = cat.GetInstanceNames()
+                              .Where(n => n.Contains("engtype_3D",
+                                          StringComparison.OrdinalIgnoreCase))
+                              .ToArray();
+
+            if (instances.Length > 0)
+            {
+                _gpuCounters = instances
+                    .Select(i => new PerformanceCounter(
+                                     "GPU Engine", "Utilization Percentage", i))
+                    .ToArray();
+                // warmup
+                foreach (var c in _gpuCounters)
+                    c.NextValue();
+                GpuAvailable = true;
+            }
         }
-        catch (Exception ex)
+        catch
         {
-            AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything | ExceptionFormats.ShowLinks);
+            GpuAvailable = false;
         }
+    }
+
+    public void Refresh()
+    {
+        CpuPct = _cpuCounter.NextValue();
+
+        var (total, _, usedPct) = NativeMemory.GetStatus();
+        RamTotalGB = total;
+        RamUsedPct = usedPct;
+        RamUsedGB = total * usedPct / 100.0;
+
+        if (GpuAvailable && _gpuCounters is { Length: > 0 })
+        {
+            // Task Manager lấy giá trị MAX của tất cả 3D engines
+            GpuPct = _gpuCounters.Select(c =>
+            {
+                try
+                { return c.NextValue(); }
+                catch { return 0f; }
+            }).DefaultIfEmpty(0f).Max();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cpuCounter.Dispose();
+        _ramCounter.Dispose();
+        if (_gpuCounters != null)
+            foreach (var c in _gpuCounters)
+                c.Dispose();
+    }
+}
+
+class Program
+{
+    // ── Helpers vẽ gauge / bar ─────────────────────────────────────────────
+    static string ColorForPct(double pct) =>
+        pct >= 80 ? "red" : pct >= 50 ? "yellow" : "green";
+
+    static string BuildBar(double pct, int width = 20)
+    {
+        int filled = (int) (pct / 100.0 * width);
+        filled = Math.Clamp(filled, 0, width);
+        string col = ColorForPct(pct);
+        string bar = new string('█', filled) + new string('░', width - filled);
+        return $"[{col}]{bar}[/]";
+    }
+
+    static Panel MakeCpuPanel(float cpuPct)
+    {
+        var grid = new Grid().AddColumn().AddColumn();
+        grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
+        grid.AddRow("Cores", $"[dim]{Environment.ProcessorCount} logical[/]");
+        return new Panel(grid)
+            .Header("[bold cyan]CPU[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand()
+            .BorderColor(Color.Cyan1);
+    }
+
+    static Panel MakeRamPanel(double usedPct, double usedGB, double totalGB)
+    {
+        var grid = new Grid().AddColumn().AddColumn();
+        grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
+        grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
+        return new Panel(grid)
+            .Header("[bold green]RAM[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand()
+            .BorderColor(Color.Green);
+    }
+
+    static Panel MakeGpuPanel(float gpuPct, bool available)
+    {
+        Panel p;
+        if (!available)
+        {
+            p = new Panel(new Markup("[dim]GPU Engine counter\nnot available[/]"))
+                .Header("[bold yellow]GPU[/]", Justify.Center)
+                .Border(BoxBorder.Rounded)
+                .Expand()
+                .BorderColor(Color.Yellow);
+        }
+        else
+        {
+            var grid = new Grid().AddColumn().AddColumn();
+            grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
+            p = new Panel(grid)
+                .Header("[bold yellow]GPU[/]", Justify.Center)
+                .Border(BoxBorder.Rounded)
+                .Expand()
+                .BorderColor(Color.Yellow);
+        }
+        return p;
+    }
+
+    static Panel MakeProcessPanel(Table tbl) =>
+        new Panel(tbl)
+            .Header("[bold white]Processes[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand()
+            .BorderColor(Color.Grey);
+
+    // ── Entry point ────────────────────────────────────────────────────────
+    static void Main()
+    {
+        const int pageSize = 10;
+
+        // ── Build layout (một lần duy nhất) ───────────────────────────────
+        var layout = new Layout("Root")
+            .SplitRows(
+                new Layout("Stat").Ratio(2),
+                new Layout("Process").Ratio(3));
+
+        layout["Stat"].SplitColumns(
+            new Layout("CPU").Ratio(1),
+            new Layout("RAM").Ratio(1),
+            new Layout("GPU").Ratio(1));
+
+        // Placeholder ban đầu
+        layout["CPU"].Update(MakeCpuPanel(0));
+        layout["RAM"].Update(MakeRamPanel(0, 0, 0));
+        layout["GPU"].Update(MakeGpuPanel(0, false));
+
+        // ── Bảng processes (tái sử dụng object, chỉ xóa rows) ─────────────
+        var procTable = new Table().NoBorder().Expand();
+        procTable.AddColumn(new TableColumn("[bold]Name[/]"));
+        procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
+        layout["Process"].Update(MakeProcessPanel(procTable));
+
+        // ── Trạng thái ────────────────────────────────────────────────────
+        int selectedIndex = 0;
+        int scrollOffset = 0;
+        SortMode sortMode = SortMode.MemoryDesc;
+        string searchQuery = "";
+        bool searchMode = false;
+        DateTime lastRefresh = DateTime.MinValue;
+        List<Process> procs = [];
+
+        using var metrics = new SystemMetrics();
+
+        AnsiConsole.Write(
+            new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
+                .Header("Instructions", Justify.Center)
+                .Border(BoxBorder.Rounded));
+        AnsiConsole.WriteLine();
+
+        // ── Live render trực tiếp vào layout ──────────────────────────────
+        AnsiConsole.Live(layout)
+            .AutoClear(false)
+            .Overflow(VerticalOverflow.Ellipsis)
+            .Cropping(VerticalOverflowCropping.Bottom)
+            .Start(ctx =>
+            {
+                while (true)
+                {
+                    bool needRefresh = (DateTime.Now - lastRefresh).TotalSeconds >= 1;
+
+                    if (needRefresh)
+                    {
+                        procs = [.. Process.GetProcesses()];
+                        lastRefresh = DateTime.Now;
+                        metrics.Refresh();
+
+                        // Cập nhật panels stat
+                        layout["CPU"].Update(MakeCpuPanel(metrics.CpuPct));
+                        layout["RAM"].Update(MakeRamPanel(metrics.RamUsedPct,
+                                                          metrics.RamUsedGB,
+                                                          metrics.RamTotalGB));
+                        layout["GPU"].Update(MakeGpuPanel(metrics.GpuPct,
+                                                          metrics.GpuAvailable));
+                    }
+
+                    // ── Lọc danh sách ─────────────────────────────────────
+                    var filtered = string.IsNullOrEmpty(searchQuery)
+                        ? procs
+                        : [.. procs.Where(p =>
+                              p.ProcessName.Contains(searchQuery,
+                                  StringComparison.OrdinalIgnoreCase))];
+
+                    // ── Sắp xếp ───────────────────────────────────────────
+                    filtered = sortMode switch
+                    {
+                        SortMode.NameAsc => [.. filtered.OrderBy(p => p.ProcessName)],
+                        SortMode.MemoryDesc => [.. filtered.OrderByDescending(p => p.WorkingSet64)],
+                        _ => filtered
+                    };
+
+                    selectedIndex = Math.Clamp(selectedIndex, 0,
+                                              Math.Max(0, filtered.Count - 1));
+
+                    // ── Đọc phím ──────────────────────────────────────────
+                    if (Console.KeyAvailable)
+                    {
+                        var ki = Console.ReadKey(true);
+                        var key = ki.Key;
+
+                        if (searchMode)
+                        {
+                            if (key == ConsoleKey.Escape)
+                            {
+                                searchMode = false;
+                                searchQuery = "";
+                            }
+                            else if (key == ConsoleKey.Backspace && searchQuery.Length > 0)
+                                searchQuery = searchQuery[..^1];
+                            else if (key == ConsoleKey.Enter)
+                                searchMode = false;
+                            else if (!char.IsControl(ki.KeyChar))
+                                searchQuery += ki.KeyChar;
+                        }
+                        else
+                        {
+                            switch (key)
+                            {
+                                case ConsoleKey.UpArrow:
+                                selectedIndex = Math.Max(0, selectedIndex - 1);
+                                if (selectedIndex < scrollOffset)
+                                    scrollOffset = selectedIndex;
+                                break;
+
+                                case ConsoleKey.DownArrow:
+                                selectedIndex = Math.Min(filtered.Count - 1, selectedIndex + 1);
+                                if (selectedIndex >= scrollOffset + pageSize)
+                                    scrollOffset = selectedIndex - pageSize + 1;
+                                break;
+
+                                case ConsoleKey.K:
+                                if (filtered.Count > 0)
+                                {
+                                    KillProcess(filtered[selectedIndex]);
+                                    Task.Delay(100).Wait();
+                                    procs = [.. Process.GetProcesses()];
+                                    lastRefresh = DateTime.Now;
+                                }
+                                break;
+
+                                case ConsoleKey.S:
+                                sortMode = sortMode == SortMode.MemoryDesc
+                                           ? SortMode.NameAsc
+                                           : SortMode.MemoryDesc;
+                                break;
+
+                                case ConsoleKey.F:
+                                searchMode = true;
+                                searchQuery = "";
+                                break;
+
+                                case ConsoleKey.Q:
+                                return;
+                            }
+                        }
+                    }
+
+                    // ── Cập nhật bảng processes ───────────────────────────
+                    procTable.Rows.Clear();
+
+                    if (searchMode || !string.IsNullOrEmpty(searchQuery))
+                        procTable.Caption = new TableTitle(
+                            $"[yellow]Search: {searchQuery}{(searchMode ? "_" : "")}[/]" +
+                            $" ([dim]{filtered.Count} results[/])");
+                    else
+                        procTable.Caption = null;
+
+                    var visible = filtered.Skip(scrollOffset).Take(pageSize).ToList();
+                    for (int i = 0; i < visible.Count; i++)
+                    {
+                        var p = visible[i];
+                        int realIdx = scrollOffset + i;
+                        bool sel = realIdx == selectedIndex;
+
+                        string name = p.ProcessName;
+                        double mb = p.WorkingSet64 / 1024.0 / 1024.0;
+                        string memColored = mb > 500
+                            ? $"[red]{mb:N2}[/]"
+                            : mb > 300
+                                ? $"[yellow]{mb:N2}[/]"
+                                : $"[green]{mb:N2}[/]";
+
+                        if (sel)
+                            procTable.AddRow($"[black on white]{name}[/]",
+                                             $"[black on white]{mb:N2}[/]");
+                        else
+                            procTable.AddRow(name, memColored);
+                    }
+
+                    // Panel process không cần tạo lại vì procTable là reference
+                    ctx.Refresh();
+                    Task.Delay(100).Wait();
+                }
+            });
+    }
+
+    static void KillProcess(Process p)
+    {
+        try
+        { p.Kill(); p.WaitForExit(1000); }
+        catch { }
     }
 }
