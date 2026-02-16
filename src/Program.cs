@@ -1,10 +1,10 @@
 ﻿using Spectre.Console;
 using System.Diagnostics;
+using System.Management;
 using System.Runtime.InteropServices;
 
 namespace src;
 
-// ── Win32 interop để lấy tổng RAM vật lý ──────────────────────────────────
 static class NativeMemory
 {
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -137,9 +137,22 @@ class Program
 
     static Panel MakeCpuPanel(float cpuPct)
     {
+        string ComputerName = "localhost";
+        ManagementScope Scope;
+        string a = String.Empty;
+        Scope = new ManagementScope(String.Format("\\\\{0}\\root\\CIMV2", ComputerName), null);
+        Scope.Connect();
+        ObjectQuery Query = new("SELECT Name FROM Win32_Processor");
+        ManagementObjectSearcher Searcher = new(Scope, Query);
+        foreach (ManagementObject WmiObject in Searcher.Get())
+        {
+            a = WmiObject["Name"].ToString();
+        }
         var grid = new Grid().AddColumn().AddColumn();
         grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
-        grid.AddRow("Cores", $"[dim]{Environment.ProcessorCount} logical[/]");
+        grid.AddRow("Cores", $"[dim]{CpuHelper.NumPhysicalCores} logical[/]");
+        grid.AddRow("OS Version", $"[dim]{Environment.OSVersion}[/]");
+        grid.AddRow("CPU", $"[dim]{a}[/]");
         return new Panel(grid)
             .Header("[bold cyan]CPU[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -174,6 +187,18 @@ class Program
         {
             var grid = new Grid().AddColumn().AddColumn();
             grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
+
+            string a = "", b = "";
+            using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                a = obj["Name"]?.ToString();
+                b = obj["DriverVersion"].ToString();
+
+            }
+            grid.AddRow("Name", a);
+            grid.AddRow("DriverVersion", b);
+
             p = new Panel(grid)
                 .Header("[bold yellow]GPU[/]", Justify.Center)
                 .Border(BoxBorder.Rounded)
@@ -190,7 +215,6 @@ class Program
             .Expand()
             .BorderColor(Color.Grey);
 
-    // ── Entry point ────────────────────────────────────────────────────────
     static void Main()
     {
         const int pageSize = 10;

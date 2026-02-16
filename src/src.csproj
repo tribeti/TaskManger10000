@@ -6,11 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<UseRidGraph>true</UseRidGraph>
+	<PublishAot>true</PublishAot>
+	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	  <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console" Version="0.54.0" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.3" />
+    <PackageReference Include="System.Management" Version="10.0.3" />
   </ItemGroup>
 
 </Project>
