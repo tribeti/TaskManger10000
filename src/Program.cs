@@ -114,7 +114,7 @@ class SystemMetrics : IDisposable
     {
         _cpuCounter.Dispose();
         _ramCounter.Dispose();
-        if (_gpuCounters != null)
+        if (_gpuCounters is not null)
             foreach (var c in _gpuCounters)
                 c.Dispose();
     }
@@ -139,20 +139,19 @@ class Program
     {
         string ComputerName = "localhost";
         ManagementScope Scope;
-        string a = String.Empty;
+        string cpuName = String.Empty;
         Scope = new ManagementScope(String.Format("\\\\{0}\\root\\CIMV2", ComputerName), null);
         Scope.Connect();
         ObjectQuery Query = new("SELECT Name FROM Win32_Processor");
         ManagementObjectSearcher Searcher = new(Scope, Query);
         foreach (ManagementObject WmiObject in Searcher.Get())
         {
-            a = WmiObject["Name"].ToString();
+            cpuName = WmiObject["Name"].ToString();
         }
         var grid = new Grid().AddColumn().AddColumn();
         grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
-        grid.AddRow("Cores", $"[dim]{CpuHelper.NumPhysicalCores} logical[/]");
+        grid.AddRow("CPU", $"[dim]{cpuName}[/]");
         grid.AddRow("OS Version", $"[dim]{Environment.OSVersion}[/]");
-        grid.AddRow("CPU", $"[dim]{a}[/]");
         return new Panel(grid)
             .Header("[bold cyan]CPU[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -165,6 +164,53 @@ class Program
         var grid = new Grid().AddColumn().AddColumn();
         grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
+        var query = "SELECT InterleavePosition FROM Win32_PhysicalMemory";
+        int interleavePos = 0;
+        int usedSlots = 0;
+        int totalSlots = 0;
+        int confSpeed = 0;
+        using (var searcher = new ManagementObjectSearcher(query))
+        {
+            var results = searcher.Get();
+            foreach (ManagementObject obj in results)
+            {
+                interleavePos = Convert.ToInt32(obj["InterleavePosition"]);
+                usedSlots++;
+            }
+        }
+        var query2 = "SELECT MemoryDevices FROM Win32_PhysicalMemoryArray";
+        using (var searcher = new ManagementObjectSearcher(query2))
+        {
+            var results = searcher.Get();
+            foreach (ManagementObject obj in results)
+            {
+                totalSlots = Convert.ToInt32(obj["MemoryDevices"]);
+            }
+        }
+        var query3 = "SELECT Speed FROM Win32_PhysicalMemory";
+        using (var searcher = new ManagementObjectSearcher(query3))
+        {
+            var results = searcher.Get();
+            foreach (ManagementObject obj in results)
+            {
+                confSpeed = Convert.ToInt32(obj["Speed"]);
+                break;
+            }
+        }
+        switch (interleavePos)
+        {
+            case 0:
+            grid.AddRow("Channel", "[green]Single[/]");
+            break;
+            case 1:
+            grid.AddRow("Channel", "[green]Dual[/]");
+            break;
+            case 2:
+            grid.AddRow("Channel", "[green]Dual[/]");
+            break;
+        }
+        grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
+        grid.AddRow("Speed", $"{confSpeed} MHz");
         return new Panel(grid)
             .Header("[bold green]RAM[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
