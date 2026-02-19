@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 
 namespace core.Helpers;
-
+// fix cpu usage info display wrong
 public class CpuHelper
 {
     // Source - https://stackoverflow.com/a/63744912

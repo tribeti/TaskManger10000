@@ -5,7 +5,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 
 namespace src;
-
+// move ram logic code to helper class
 static class NativeMemory
 {
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
