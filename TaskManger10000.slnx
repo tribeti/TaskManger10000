@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="core/core.csproj" Id="5913cd63-f969-4c2a-a52a-4edc7dff7ba2" />
   <Project Path="src/src.csproj">
     <BuildType Project="Release" />
   </Project>

@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace src;
+namespace core.Helpers;
 
 public class CpuHelper
 {

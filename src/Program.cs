@@ -1,4 +1,5 @@
-﻿using Spectre.Console;
+﻿using core.Helpers;
+using Spectre.Console;
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
@@ -33,18 +34,15 @@ static class NativeMemory
             return (0, 0, 0);
         double total = s.ullTotalPhys / 1024.0 / 1024 / 1024;
         double avail = s.ullAvailPhys / 1024.0 / 1024 / 1024;
-        double pct = s.dwMemoryLoad;          // đã là 0-100
+        double pct = s.dwMemoryLoad;
         return (total, avail, pct);
     }
 }
 
-// ── Metrics collector chạy nền ─────────────────────────────────────────────
 class SystemMetrics : IDisposable
 {
     private readonly PerformanceCounter _cpuCounter;
-    private readonly PerformanceCounter _ramCounter;   // Available MBytes
-
-    // GPU: tổng hợp tất cả instances của "GPU Engine\Utilization Percentage"
+    private readonly PerformanceCounter _ramCounter;
     private PerformanceCounter[]? _gpuCounters;
 
     public float CpuPct { get; private set; }
@@ -62,7 +60,6 @@ class SystemMetrics : IDisposable
         // Warmup: lần đầu CPU counter luôn trả 0
         _cpuCounter.NextValue();
 
-        // GPU Engine counters (Windows 10 1709+ / WDDM 2.0)
         try
         {
             var cat = new PerformanceCounterCategory("GPU Engine");
@@ -100,7 +97,6 @@ class SystemMetrics : IDisposable
 
         if (GpuAvailable && _gpuCounters is { Length: > 0 })
         {
-            // Task Manager lấy giá trị MAX của tất cả 3D engines
             GpuPct = _gpuCounters.Select(c =>
             {
                 try
@@ -165,18 +161,13 @@ class Program
         grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
         var query = "SELECT InterleavePosition FROM Win32_PhysicalMemory";
-        int interleavePos = 0;
         int usedSlots = 0;
         int totalSlots = 0;
         int confSpeed = 0;
         using (var searcher = new ManagementObjectSearcher(query))
         {
             var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                interleavePos = Convert.ToInt32(obj["InterleavePosition"]);
-                usedSlots++;
-            }
+            usedSlots += (from ManagementObject obj in results select obj).Count();
         }
         var query2 = "SELECT MemoryDevices FROM Win32_PhysicalMemoryArray";
         using (var searcher = new ManagementObjectSearcher(query2))
@@ -196,18 +187,6 @@ class Program
                 confSpeed = Convert.ToInt32(obj["Speed"]);
                 break;
             }
-        }
-        switch (interleavePos)
-        {
-            case 0:
-            grid.AddRow("Channel", "[green]Single[/]");
-            break;
-            case 1:
-            grid.AddRow("Channel", "[green]Dual[/]");
-            break;
-            case 2:
-            grid.AddRow("Channel", "[green]Dual[/]");
-            break;
         }
         grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
         grid.AddRow("Speed", $"{confSpeed} MHz");
@@ -234,16 +213,18 @@ class Program
             var grid = new Grid().AddColumn().AddColumn();
             grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
 
-            string a = "", b = "";
+            string gpuName = "", driverVer = "";
             using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
             foreach (ManagementObject obj in searcher.Get())
             {
-                a = obj["Name"]?.ToString();
-                b = obj["DriverVersion"].ToString();
-
+                gpuName = obj["Name"]?.ToString();
+                driverVer = obj["DriverVersion"].ToString();
             }
-            grid.AddRow("Name", a);
-            grid.AddRow("DriverVersion", b);
+            grid.AddRow("Name", gpuName);
+            grid.AddRow("DriverVersion", driverVer);
+            var gpuCounters = GpuHelper.GetGPUCounters();
+            var gpuUsage = GpuHelper.GetGPUUsage(gpuCounters);
+            grid.AddRow("Total Usage", gpuUsage.ToString());
 
             p = new Panel(grid)
                 .Header("[bold yellow]GPU[/]", Justify.Center)
@@ -443,7 +424,6 @@ class Program
                             procTable.AddRow(name, memColored);
                     }
 
-                    // Panel process không cần tạo lại vì procTable là reference
                     ctx.Refresh();
                     Task.Delay(100).Wait();
                 }
