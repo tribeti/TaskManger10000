@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Management;
 
 namespace core.Helpers;
 
@@ -28,5 +29,18 @@ public class GpuHelper
         Thread.Sleep(1000);
         var result = gpuCounters.Sum(x => x.NextValue());
         return result;
+    }
+
+    public static (string gpuName, string driverVer) GetGPUInfo()
+    {
+        string? gpuName = String.Empty;
+        string? driverVer = String.Empty;
+        using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
+        foreach (ManagementObject obj in searcher.Get())
+        {
+            gpuName = obj["Name"]?.ToString();
+            driverVer = obj["DriverVersion"].ToString();
+        }
+        return (gpuName ?? "Unknown GPU", driverVer ?? "Unknown Driver Version");
     }
 }

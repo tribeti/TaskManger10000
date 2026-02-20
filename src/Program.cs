@@ -1,7 +1,6 @@
 ﻿using core.Helpers;
 using Spectre.Console;
 using System.Diagnostics;
-using System.Management;
 
 namespace src;
 
@@ -127,41 +126,21 @@ class Program
 
     static Panel MakeGpuPanel(float gpuPct, bool available)
     {
-        Panel p;
-        if (!available)
-        {
-            p = new Panel(new Markup("[dim]GPU Engine counter\nnot available[/]"))
-                .Header("[bold yellow]GPU[/]", Justify.Center)
-                .Border(BoxBorder.Rounded)
-                .Expand()
-                .BorderColor(Color.Yellow);
-        }
-        else
-        {
-            var grid = new Grid().AddColumn().AddColumn();
-            grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
+        var grid = new Grid().AddColumn().AddColumn();
+        grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
 
-            string? gpuName = String.Empty;
-            string? driverVer = String.Empty;
-            using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
-            foreach (ManagementObject obj in searcher.Get())
-            {
-                gpuName = obj["Name"]?.ToString();
-                driverVer = obj["DriverVersion"].ToString();
-            }
-            grid.AddRow("Name", gpuName);
-            grid.AddRow("DriverVersion", driverVer);
-            var gpuCounters = GpuHelper.GetGPUCounters();
-            var gpuUsage = GpuHelper.GetGPUUsage(gpuCounters);
-            grid.AddRow("Total Usage", gpuUsage.ToString());
+        var (gpuName, driverVer) = GpuHelper.GetGPUInfo();
+        grid.AddRow("Name", gpuName);
+        grid.AddRow("DriverVersion", driverVer);
 
-            p = new Panel(grid)
-                .Header("[bold yellow]GPU[/]", Justify.Center)
-                .Border(BoxBorder.Rounded)
-                .Expand()
-                .BorderColor(Color.Yellow);
-        }
-        return p;
+        var gpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
+        grid.AddRow("Total Usage", gpuUsage.ToString("0.000") + "%");
+
+        return new Panel(grid)
+            .Header("[bold yellow]GPU[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand()
+            .BorderColor(Color.Yellow);
     }
 
     static Panel MakeProcessPanel(Table tbl) =>
@@ -193,6 +172,7 @@ class Program
 
         // ── Bảng processes (tái sử dụng object, chỉ xóa rows) ─────────────
         var procTable = new Table().NoBorder().Expand();
+        procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
         layout["Process"].Update(MakeProcessPanel(procTable));
@@ -223,7 +203,7 @@ class Program
             {
                 while (true)
                 {
-                    bool needRefresh = (DateTime.Now - lastRefresh).TotalSeconds >= 1;
+                    bool needRefresh = (DateTime.Now - lastRefresh).TotalSeconds >= 3;
 
                     if (needRefresh)
                     {
@@ -337,6 +317,7 @@ class Program
                         int realIdx = scrollOffset + i;
                         bool sel = realIdx == selectedIndex;
 
+                        string pid = p.Id.ToString();
                         string name = p.ProcessName;
                         double mb = p.WorkingSet64 / 1024.0 / 1024.0;
                         string memColored = mb > 500
@@ -346,10 +327,11 @@ class Program
                                 : $"[green]{mb:N2}[/]";
 
                         if (sel)
-                            procTable.AddRow($"[black on white]{name}[/]",
+                            procTable.AddRow($"[black on white]{pid}[/]",
+                                             $"[black on white]{name}[/]",
                                              $"[black on white]{mb:N2}[/]");
                         else
-                            procTable.AddRow(name, memColored);
+                            procTable.AddRow(pid, name, memColored);
                     }
 
                     ctx.Refresh();
