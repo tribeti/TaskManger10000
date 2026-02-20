@@ -8,23 +8,6 @@ namespace core.Helpers;
 
 public class GpuHelper
 {
-    //static void Main(string[] _)
-    //{
-    //    while (true)
-    //    {
-    //        try
-    //        {
-    //            var gpuCounters = GetGPUCounters();
-    //            var gpuUsage = GetGPUUsage(gpuCounters);
-    //            Console.WriteLine(gpuUsage);
-    //            continue;
-    //        }
-    //        catch { }
-
-    //        Thread.Sleep(1000);
-    //    }
-    //}
-
     public static List<PerformanceCounter> GetGPUCounters()
     {
         var category = new PerformanceCounterCategory("GPU Engine");

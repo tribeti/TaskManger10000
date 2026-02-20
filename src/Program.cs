@@ -2,42 +2,8 @@
 using Spectre.Console;
 using System.Diagnostics;
 using System.Management;
-using System.Runtime.InteropServices;
 
 namespace src;
-// move ram logic code to helper class
-static class NativeMemory
-{
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private class MEMORYSTATUSEX
-    {
-        public uint dwLength;
-        public uint dwMemoryLoad;
-        public ulong ullTotalPhys;
-        public ulong ullAvailPhys;
-        public ulong ullTotalPageFile;
-        public ulong ullAvailPageFile;
-        public ulong ullTotalVirtual;
-        public ulong ullAvailVirtual;
-        public ulong ullAvailExtendedVirtual;
-        public MEMORYSTATUSEX() => dwLength = (uint) Marshal.SizeOf(typeof(MEMORYSTATUSEX));
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
-
-    public static (double totalGB, double availGB, double usedPct) GetStatus()
-    {
-        var s = new MEMORYSTATUSEX();
-        if (!GlobalMemoryStatusEx(s))
-            return (0, 0, 0);
-        double total = s.ullTotalPhys / 1024.0 / 1024 / 1024;
-        double avail = s.ullAvailPhys / 1024.0 / 1024 / 1024;
-        double pct = s.dwMemoryLoad;
-        return (total, avail, pct);
-    }
-}
 
 class SystemMetrics : IDisposable
 {
@@ -56,8 +22,6 @@ class SystemMetrics : IDisposable
     {
         _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
         _ramCounter = new PerformanceCounter("Memory", "Available MBytes");
-
-        // Warmup: lần đầu CPU counter luôn trả 0
         _cpuCounter.NextValue();
 
         try
@@ -71,8 +35,7 @@ class SystemMetrics : IDisposable
             if (instances.Length > 0)
             {
                 _gpuCounters = instances
-                    .Select(i => new PerformanceCounter(
-                                     "GPU Engine", "Utilization Percentage", i))
+                    .Select(i => new PerformanceCounter("GPU Engine", "Utilization Percentage", i))
                     .ToArray();
                 // warmup
                 foreach (var c in _gpuCounters)
@@ -89,8 +52,7 @@ class SystemMetrics : IDisposable
     public void Refresh()
     {
         CpuPct = _cpuCounter.NextValue();
-
-        var (total, _, usedPct) = NativeMemory.GetStatus();
+        var (total, _, usedPct) = RamHelper.GetMemoryStatus();
         RamTotalGB = total;
         RamUsedPct = usedPct;
         RamUsedGB = total * usedPct / 100.0;
@@ -133,21 +95,14 @@ class Program
 
     static Panel MakeCpuPanel(float cpuPct)
     {
-        string ComputerName = "localhost";
-        ManagementScope Scope;
-        string cpuName = String.Empty;
-        Scope = new ManagementScope(String.Format("\\\\{0}\\root\\CIMV2", ComputerName), null);
-        Scope.Connect();
-        ObjectQuery Query = new("SELECT Name FROM Win32_Processor");
-        ManagementObjectSearcher Searcher = new(Scope, Query);
-        foreach (ManagementObject WmiObject in Searcher.Get())
-        {
-            cpuName = WmiObject["Name"].ToString();
-        }
         var grid = new Grid().AddColumn().AddColumn();
+        // draw cpu usage bar
         grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
-        grid.AddRow("CPU", $"[dim]{cpuName}[/]");
+        // get cpu name
+        grid.AddRow("CPU", $"[dim]{CpuHelper.GetProcessorCoreName()}[/]");
+        // get os version
         grid.AddRow("OS Version", $"[dim]{Environment.OSVersion}[/]");
+
         return new Panel(grid)
             .Header("[bold cyan]CPU[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -160,34 +115,7 @@ class Program
         var grid = new Grid().AddColumn().AddColumn();
         grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
-        var query = "SELECT InterleavePosition FROM Win32_PhysicalMemory";
-        int usedSlots = 0;
-        int totalSlots = 0;
-        int confSpeed = 0;
-        using (var searcher = new ManagementObjectSearcher(query))
-        {
-            var results = searcher.Get();
-            usedSlots += (from ManagementObject obj in results select obj).Count();
-        }
-        var query2 = "SELECT MemoryDevices FROM Win32_PhysicalMemoryArray";
-        using (var searcher = new ManagementObjectSearcher(query2))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                totalSlots = Convert.ToInt32(obj["MemoryDevices"]);
-            }
-        }
-        var query3 = "SELECT Speed FROM Win32_PhysicalMemory";
-        using (var searcher = new ManagementObjectSearcher(query3))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                confSpeed = Convert.ToInt32(obj["Speed"]);
-                break;
-            }
-        }
+        var (usedSlots, totalSlots, confSpeed) = RamHelper.GetMemoryInfo();
         grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
         grid.AddRow("Speed", $"{confSpeed} MHz");
         return new Panel(grid)
@@ -213,7 +141,8 @@ class Program
             var grid = new Grid().AddColumn().AddColumn();
             grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
 
-            string gpuName = "", driverVer = "";
+            string? gpuName = String.Empty;
+            string? driverVer = String.Empty;
             using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
             foreach (ManagementObject obj in searcher.Get())
             {
@@ -326,8 +255,7 @@ class Program
                         _ => filtered
                     };
 
-                    selectedIndex = Math.Clamp(selectedIndex, 0,
-                                              Math.Max(0, filtered.Count - 1));
+                    selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, filtered.Count - 1));
 
                     // ── Đọc phím ──────────────────────────────────────────
                     if (Console.KeyAvailable)
