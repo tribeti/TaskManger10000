@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.3" />
+		<!-- remove ts bc not compatible with native aot
+		<PackageReference Include="System.Management" Version="10.0.3" />-->	
+	</ItemGroup>
+
+</Project>

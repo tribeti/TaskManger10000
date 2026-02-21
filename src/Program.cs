@@ -1,157 +1,28 @@
-﻿using Spectre.Console;
+﻿using core.Helpers;
+using Spectre.Console;
 using System.Diagnostics;
-using System.Management;
-using System.Runtime.InteropServices;
 
 namespace src;
 
-static class NativeMemory
-{
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private class MEMORYSTATUSEX
-    {
-        public uint dwLength;
-        public uint dwMemoryLoad;
-        public ulong ullTotalPhys;
-        public ulong ullAvailPhys;
-        public ulong ullTotalPageFile;
-        public ulong ullAvailPageFile;
-        public ulong ullTotalVirtual;
-        public ulong ullAvailVirtual;
-        public ulong ullAvailExtendedVirtual;
-        public MEMORYSTATUSEX() => dwLength = (uint) Marshal.SizeOf(typeof(MEMORYSTATUSEX));
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX lpBuffer);
-
-    public static (double totalGB, double availGB, double usedPct) GetStatus()
-    {
-        var s = new MEMORYSTATUSEX();
-        if (!GlobalMemoryStatusEx(s))
-            return (0, 0, 0);
-        double total = s.ullTotalPhys / 1024.0 / 1024 / 1024;
-        double avail = s.ullAvailPhys / 1024.0 / 1024 / 1024;
-        double pct = s.dwMemoryLoad;          // đã là 0-100
-        return (total, avail, pct);
-    }
-}
-
-// ── Metrics collector chạy nền ─────────────────────────────────────────────
-class SystemMetrics : IDisposable
-{
-    private readonly PerformanceCounter _cpuCounter;
-    private readonly PerformanceCounter _ramCounter;   // Available MBytes
-
-    // GPU: tổng hợp tất cả instances của "GPU Engine\Utilization Percentage"
-    private PerformanceCounter[]? _gpuCounters;
-
-    public float CpuPct { get; private set; }
-    public double RamUsedPct { get; private set; }
-    public double RamTotalGB { get; private set; }
-    public double RamUsedGB { get; private set; }
-    public float GpuPct { get; private set; }
-    public bool GpuAvailable { get; private set; }
-
-    public SystemMetrics()
-    {
-        _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-        _ramCounter = new PerformanceCounter("Memory", "Available MBytes");
-
-        // Warmup: lần đầu CPU counter luôn trả 0
-        _cpuCounter.NextValue();
-
-        // GPU Engine counters (Windows 10 1709+ / WDDM 2.0)
-        try
-        {
-            var cat = new PerformanceCounterCategory("GPU Engine");
-            var instances = cat.GetInstanceNames()
-                              .Where(n => n.Contains("engtype_3D",
-                                          StringComparison.OrdinalIgnoreCase))
-                              .ToArray();
-
-            if (instances.Length > 0)
-            {
-                _gpuCounters = instances
-                    .Select(i => new PerformanceCounter(
-                                     "GPU Engine", "Utilization Percentage", i))
-                    .ToArray();
-                // warmup
-                foreach (var c in _gpuCounters)
-                    c.NextValue();
-                GpuAvailable = true;
-            }
-        }
-        catch
-        {
-            GpuAvailable = false;
-        }
-    }
-
-    public void Refresh()
-    {
-        CpuPct = _cpuCounter.NextValue();
-
-        var (total, _, usedPct) = NativeMemory.GetStatus();
-        RamTotalGB = total;
-        RamUsedPct = usedPct;
-        RamUsedGB = total * usedPct / 100.0;
-
-        if (GpuAvailable && _gpuCounters is { Length: > 0 })
-        {
-            // Task Manager lấy giá trị MAX của tất cả 3D engines
-            GpuPct = _gpuCounters.Select(c =>
-            {
-                try
-                { return c.NextValue(); }
-                catch { return 0f; }
-            }).DefaultIfEmpty(0f).Max();
-        }
-    }
-
-    public void Dispose()
-    {
-        _cpuCounter.Dispose();
-        _ramCounter.Dispose();
-        if (_gpuCounters is not null)
-            foreach (var c in _gpuCounters)
-                c.Dispose();
-    }
-}
-
 class Program
 {
-    // ── Helpers vẽ gauge / bar ─────────────────────────────────────────────
-    static string ColorForPct(double pct) =>
-        pct >= 80 ? "red" : pct >= 50 ? "yellow" : "green";
-
-    static string BuildBar(double pct, int width = 20)
+    static Panel MakeCpuPanel(double cpuPct)
     {
-        int filled = (int) (pct / 100.0 * width);
-        filled = Math.Clamp(filled, 0, width);
-        string col = ColorForPct(pct);
-        string bar = new string('█', filled) + new string('░', width - filled);
-        return $"[{col}]{bar}[/]";
-    }
-
-    static Panel MakeCpuPanel(float cpuPct)
-    {
-        string ComputerName = "localhost";
-        ManagementScope Scope;
-        string cpuName = String.Empty;
-        Scope = new ManagementScope(String.Format("\\\\{0}\\root\\CIMV2", ComputerName), null);
-        Scope.Connect();
-        ObjectQuery Query = new("SELECT Name FROM Win32_Processor");
-        ManagementObjectSearcher Searcher = new(Scope, Query);
-        foreach (ManagementObject WmiObject in Searcher.Get())
-        {
-            cpuName = WmiObject["Name"].ToString();
-        }
         var grid = new Grid().AddColumn().AddColumn();
-        grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
-        grid.AddRow("CPU", $"[dim]{cpuName}[/]");
+        // draw cpu usage bar
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", cpuPct, Color.Red)
+            .AddItem("Free", 100 - cpuPct, Color.Green)
+        );
+        // get cpu name
+        grid.AddRow("CPU", $"[dim]{CpuHelper.GetProcessorCoreName()}[/]");
+        // get os version
         grid.AddRow("OS Version", $"[dim]{Environment.OSVersion}[/]");
+
         return new Panel(grid)
             .Header("[bold cyan]CPU[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -162,55 +33,18 @@ class Program
     static Panel MakeRamPanel(double usedPct, double usedGB, double totalGB)
     {
         var grid = new Grid().AddColumn().AddColumn();
-        grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
+        // draw ram usage
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", usedPct, Color.Red)
+            .AddItem("Free", 100 - usedPct, Color.Green)
+        );
+        // show used / total in GB
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
-        var query = "SELECT InterleavePosition FROM Win32_PhysicalMemory";
-        int interleavePos = 0;
-        int usedSlots = 0;
-        int totalSlots = 0;
-        int confSpeed = 0;
-        using (var searcher = new ManagementObjectSearcher(query))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                interleavePos = Convert.ToInt32(obj["InterleavePosition"]);
-                usedSlots++;
-            }
-        }
-        var query2 = "SELECT MemoryDevices FROM Win32_PhysicalMemoryArray";
-        using (var searcher = new ManagementObjectSearcher(query2))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                totalSlots = Convert.ToInt32(obj["MemoryDevices"]);
-            }
-        }
-        var query3 = "SELECT Speed FROM Win32_PhysicalMemory";
-        using (var searcher = new ManagementObjectSearcher(query3))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                confSpeed = Convert.ToInt32(obj["Speed"]);
-                break;
-            }
-        }
-        switch (interleavePos)
-        {
-            case 0:
-            grid.AddRow("Channel", "[green]Single[/]");
-            break;
-            case 1:
-            grid.AddRow("Channel", "[green]Dual[/]");
-            break;
-            case 2:
-            grid.AddRow("Channel", "[green]Dual[/]");
-            break;
-        }
-        grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
-        grid.AddRow("Speed", $"{confSpeed} MHz");
+
         return new Panel(grid)
             .Header("[bold green]RAM[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -218,40 +52,29 @@ class Program
             .BorderColor(Color.Green);
     }
 
-    static Panel MakeGpuPanel(float gpuPct, bool available)
+    static Panel MakeGpuPanel()
     {
-        Panel p;
-        if (!available)
-        {
-            p = new Panel(new Markup("[dim]GPU Engine counter\nnot available[/]"))
-                .Header("[bold yellow]GPU[/]", Justify.Center)
-                .Border(BoxBorder.Rounded)
-                .Expand()
-                .BorderColor(Color.Yellow);
-        }
-        else
-        {
-            var grid = new Grid().AddColumn().AddColumn();
-            grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
+        var grid = new Grid().AddColumn().AddColumn();
+        var gpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
+        // draw gpu usage
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", gpuUsage, Color.Red)
+            .AddItem("Free", 100 - gpuUsage, Color.Green)
+        );
 
-            string a = "", b = "";
-            using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
-            foreach (ManagementObject obj in searcher.Get())
-            {
-                a = obj["Name"]?.ToString();
-                b = obj["DriverVersion"].ToString();
+        var (gpuName, driverVer) = GpuHelper.GetGPUInfo();
+        grid.AddRow("Name", gpuName);
+        grid.AddRow("DriverVersion", driverVer);
 
-            }
-            grid.AddRow("Name", a);
-            grid.AddRow("DriverVersion", b);
-
-            p = new Panel(grid)
-                .Header("[bold yellow]GPU[/]", Justify.Center)
-                .Border(BoxBorder.Rounded)
-                .Expand()
-                .BorderColor(Color.Yellow);
-        }
-        return p;
+        return new Panel(grid)
+            .Header("[bold yellow]GPU[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand()
+            .BorderColor(Color.Yellow);
     }
 
     static Panel MakeProcessPanel(Table tbl) =>
@@ -279,10 +102,11 @@ class Program
         // Placeholder ban đầu
         layout["CPU"].Update(MakeCpuPanel(0));
         layout["RAM"].Update(MakeRamPanel(0, 0, 0));
-        layout["GPU"].Update(MakeGpuPanel(0, false));
+        layout["GPU"].Update(MakeGpuPanel());
 
         // ── Bảng processes (tái sử dụng object, chỉ xóa rows) ─────────────
         var procTable = new Table().NoBorder().Expand();
+        procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
         layout["Process"].Update(MakeProcessPanel(procTable));
@@ -295,8 +119,6 @@ class Program
         bool searchMode = false;
         DateTime lastRefresh = DateTime.MinValue;
         List<Process> procs = [];
-
-        using var metrics = new SystemMetrics();
 
         AnsiConsole.Write(
             new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
@@ -313,21 +135,19 @@ class Program
             {
                 while (true)
                 {
-                    bool needRefresh = (DateTime.Now - lastRefresh).TotalSeconds >= 1;
+                    bool needRefresh = (DateTime.Now - lastRefresh).TotalMilliseconds >= 1500;
 
                     if (needRefresh)
                     {
                         procs = [.. Process.GetProcesses()];
                         lastRefresh = DateTime.Now;
-                        metrics.Refresh();
 
-                        // Cập nhật panels stat
-                        layout["CPU"].Update(MakeCpuPanel(metrics.CpuPct));
-                        layout["RAM"].Update(MakeRamPanel(metrics.RamUsedPct,
-                                                          metrics.RamUsedGB,
-                                                          metrics.RamTotalGB));
-                        layout["GPU"].Update(MakeGpuPanel(metrics.GpuPct,
-                                                          metrics.GpuAvailable));
+                        // update stat panels
+                        layout["CPU"].Update(MakeCpuPanel(CpuHelper.GetCpuUsage()));
+                        var (totalGB, _, usedPct) = RamHelper.GetMemoryStatus();
+                        double usedGB = totalGB * usedPct / 100.0;
+                        layout["RAM"].Update(MakeRamPanel(usedPct, usedGB, totalGB));
+                        layout["GPU"].Update(MakeGpuPanel());
                     }
 
                     // ── Lọc danh sách ─────────────────────────────────────
@@ -345,8 +165,7 @@ class Program
                         _ => filtered
                     };
 
-                    selectedIndex = Math.Clamp(selectedIndex, 0,
-                                              Math.Max(0, filtered.Count - 1));
+                    selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, filtered.Count - 1));
 
                     // ── Đọc phím ──────────────────────────────────────────
                     if (Console.KeyAvailable)
@@ -428,6 +247,7 @@ class Program
                         int realIdx = scrollOffset + i;
                         bool sel = realIdx == selectedIndex;
 
+                        string pid = p.Id.ToString();
                         string name = p.ProcessName;
                         double mb = p.WorkingSet64 / 1024.0 / 1024.0;
                         string memColored = mb > 500
@@ -437,15 +257,15 @@ class Program
                                 : $"[green]{mb:N2}[/]";
 
                         if (sel)
-                            procTable.AddRow($"[black on white]{name}[/]",
+                            procTable.AddRow($"[black on white]{pid}[/]",
+                                             $"[black on white]{name}[/]",
                                              $"[black on white]{mb:N2}[/]");
                         else
-                            procTable.AddRow(name, memColored);
+                            procTable.AddRow(pid, name, memColored);
                     }
 
-                    // Panel process không cần tạo lại vì procTable là reference
                     ctx.Refresh();
-                    Task.Delay(100).Wait();
+                    Thread.Sleep(200);
                 }
             });
     }
