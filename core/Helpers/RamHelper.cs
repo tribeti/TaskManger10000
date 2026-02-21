@@ -1,5 +1,4 @@
-﻿using System.Management;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace core.Helpers;
 
@@ -37,42 +36,5 @@ public class RamHelper
         double avail = s.ullAvailPhys / 1024.0 / 1024 / 1024;
         double pct = s.dwMemoryLoad;
         return (total, avail, pct);
-    }
-
-    public static (int usedSlots, int totalSlots, int confSpeed) GetMemoryInfo()
-    {
-        int usedSlots = 0, totalSlots = 0, confSpeed = 0;
-
-        // get used slots
-        var query = "SELECT InterleavePosition FROM Win32_PhysicalMemory";
-        using (var searcher = new ManagementObjectSearcher(query))
-        {
-            var results = searcher.Get();
-            usedSlots += (from ManagementObject obj in results select obj).Count();
-        }
-
-        // get total slots
-        var query2 = "SELECT MemoryDevices FROM Win32_PhysicalMemoryArray";
-        using (var searcher = new ManagementObjectSearcher(query2))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                totalSlots = Convert.ToInt32(obj["MemoryDevices"]);
-            }
-        }
-
-        // get configured speed
-        var query3 = "SELECT Speed FROM Win32_PhysicalMemory";
-        using (var searcher = new ManagementObjectSearcher(query3))
-        {
-            var results = searcher.Get();
-            foreach (ManagementObject obj in results)
-            {
-                confSpeed = Convert.ToInt32(obj["Speed"]);
-                break;
-            }
-        }
-        return (usedSlots, totalSlots, confSpeed);
     }
 }

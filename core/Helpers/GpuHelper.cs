@@ -1,5 +1,5 @@
-﻿using System.Diagnostics;
-using System.Management;
+﻿using Microsoft.Win32;
+using System.Diagnostics;
 
 namespace core.Helpers;
 
@@ -30,16 +30,35 @@ public class GpuHelper
         return Math.Round(gpuCounters.Sum(x => x.NextValue()), 1);
     }
 
+    // not tested on multi-GPU systems, but should return the first GPU's info (maybe igpu idk)
     public static (string gpuName, string driverVer) GetGPUInfo()
     {
-        string? gpuName = String.Empty;
-        string? driverVer = String.Empty;
-        using var searcher = new ManagementObjectSearcher("select * from Win32_VideoController");
-        foreach (ManagementObject obj in searcher.Get())
+        string gpuName = "Unknown GPU";
+        string driverVer = "Unknown Driver Version";
+        const string basePath = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+        using var baseKey = Registry.LocalMachine.OpenSubKey(basePath);
+        if (baseKey is null)
+            return (gpuName, driverVer);
+
+        foreach (var subKeyName in baseKey.GetSubKeyNames())
         {
-            gpuName = obj["Name"]?.ToString();
-            driverVer = obj["DriverVersion"].ToString();
+            if (!int.TryParse(subKeyName, out _))
+                continue;
+
+            using var subKey = baseKey.OpenSubKey(subKeyName);
+            if (subKey is null)
+                continue;
+
+            var name = subKey.GetValue("DriverDesc")?.ToString();
+            var driver = subKey.GetValue("DriverVersion")?.ToString();
+
+            if (!string.IsNullOrEmpty(name))
+            {
+                gpuName = name;
+                driverVer = driver ?? "Unknown Driver Version";
+                break;
+            }
         }
-        return (gpuName ?? "Unknown GPU", driverVer ?? "Unknown Driver Version");
+        return (gpuName, driverVer);
     }
 }

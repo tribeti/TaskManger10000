@@ -44,9 +44,6 @@ class Program
         );
         // show used / total in GB
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
-        var (usedSlots, totalSlots, confSpeed) = RamHelper.GetMemoryInfo();
-        grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
-        grid.AddRow("Speed", $"{confSpeed} MHz");
 
         return new Panel(grid)
             .Header("[bold green]RAM[/]", Justify.Center)

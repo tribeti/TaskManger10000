@@ -1,5 +1,5 @@
-﻿using System.Diagnostics;
-using System.Management;
+﻿using Microsoft.Win32;
+using System.Diagnostics;
 
 namespace core.Helpers;
 // get cpu usage by each core
@@ -7,17 +7,17 @@ public class CpuHelper
 {
     public static string GetProcessorCoreName()
     {
-        string ComputerName = "localhost";
-        string? cpuName = String.Empty;
-        ManagementScope Scope = new(String.Format("\\\\{0}\\root\\CIMV2", ComputerName), null);
-        Scope.Connect();
-        ObjectQuery Query = new("SELECT Name FROM Win32_Processor");
-        ManagementObjectSearcher Searcher = new(Scope, Query);
-        foreach (ManagementObject WmiObject in Searcher.Get())
+        try
         {
-            cpuName = WmiObject["Name"].ToString();
+            using var key = Registry.LocalMachine.OpenSubKey(
+                @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+            return key?.GetValue("ProcessorNameString")?.ToString()?.Trim()
+                   ?? "Unknown CPU";
         }
-        return cpuName ?? "Unknown CPU";
+        catch
+        {
+            return "Unknown CPU";
+        }
     }
 
     public static double GetCpuUsage()
