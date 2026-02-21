@@ -23,12 +23,11 @@ public class GpuHelper
         return gpuCounters;
     }
 
-    public static float GetGPUUsage(List<PerformanceCounter> gpuCounters)
+    public static double GetGPUUsage(List<PerformanceCounter> gpuCounters)
     {
         gpuCounters.ForEach(x => x.NextValue());
         Thread.Sleep(1000);
-        var result = gpuCounters.Sum(x => x.NextValue());
-        return result;
+        return Math.Round(gpuCounters.Sum(x => x.NextValue()), 1);
     }
 
     public static (string gpuName, string driverVer) GetGPUInfo()

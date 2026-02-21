@@ -20,7 +20,7 @@ public class CpuHelper
         return cpuName ?? "Unknown CPU";
     }
 
-    public static float GetCpuUsage()
+    public static double GetCpuUsage()
     {
         // Source - https://stackoverflow.com/a/51194100
         // Posted by L_J
@@ -29,7 +29,7 @@ public class CpuHelper
         var cpuUsage = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total");
         cpuUsage.NextValue();
         Thread.Sleep(500);
-        return Math.Min(cpuUsage.NextValue(), 100f);
+        return Math.Round(cpuUsage.NextValue(), 1);
     }
 
     public static float GetCpuUsageByCore(int coreIndex)

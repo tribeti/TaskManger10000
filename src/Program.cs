@@ -4,96 +4,20 @@ using System.Diagnostics;
 
 namespace src;
 
-class SystemMetrics : IDisposable
-{
-    private readonly PerformanceCounter _cpuCounter;
-    private PerformanceCounter[]? _gpuCounters;
-    public float CpuPct { get; private set; }
-    public double RamUsedPct { get; private set; }
-    public double RamTotalGB { get; private set; }
-    public double RamUsedGB { get; private set; }
-    public float GpuPct { get; private set; }
-    public bool GpuAvailable { get; private set; }
-
-    public SystemMetrics()
-    {
-        _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-        _cpuCounter.NextValue();
-
-        try
-        {
-            var cat = new PerformanceCounterCategory("GPU Engine");
-            var instances = cat.GetInstanceNames()
-                              .Where(n => n.Contains("engtype_3D",
-                                          StringComparison.OrdinalIgnoreCase))
-                              .ToArray();
-
-            if (instances.Length > 0)
-            {
-                _gpuCounters = instances
-                    .Select(i => new PerformanceCounter("GPU Engine", "Utilization Percentage", i))
-                    .ToArray();
-                // warmup
-                foreach (var c in _gpuCounters)
-                    c.NextValue();
-                GpuAvailable = true;
-            }
-        }
-        catch
-        {
-            GpuAvailable = false;
-        }
-    }
-
-    public void Refresh()
-    {
-        CpuPct = _cpuCounter.NextValue();
-        var (total, _, usedPct) = RamHelper.GetMemoryStatus();
-        RamTotalGB = total;
-        RamUsedPct = usedPct;
-        RamUsedGB = total * usedPct / 100.0;
-
-        if (GpuAvailable && _gpuCounters is { Length: > 0 })
-        {
-            GpuPct = _gpuCounters.Select(c =>
-            {
-                try
-                { return c.NextValue(); }
-                catch { return 0f; }
-            }).DefaultIfEmpty(0f).Max();
-        }
-    }
-
-    public void Dispose()
-    {
-        _cpuCounter.Dispose();
-        if (_gpuCounters is not null)
-            foreach (var c in _gpuCounters)
-                c.Dispose();
-    }
-}
-
 class Program
 {
-    // update : use breakdown chart instead of gauge to show more info, and also add color
-    // https://spectreconsole.net/console/widgets/breakdown-chart
-    static string ColorForPct(double pct) =>
-        pct >= 80 ? "red" : pct >= 50 ? "yellow" : "green";
-
-    static string BuildBar(double pct, int width = 20)
-    {
-        int filled = (int) (pct / 100.0 * width);
-        filled = Math.Clamp(filled, 0, width);
-        string col = ColorForPct(pct);
-        string bar = new string('█', filled) + new string('░', width - filled);
-        return $"[{col}]{bar}[/]";
-    }
-
-    static Panel MakeCpuPanel(float cpuPct)
+    static Panel MakeCpuPanel(double cpuPct)
     {
         var grid = new Grid().AddColumn().AddColumn();
         // draw cpu usage bar
-        grid.AddRow("Usage", $"{BuildBar(cpuPct)} [{ColorForPct(cpuPct)}]{cpuPct,5:F1}%[/]");
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", cpuPct, Color.Red)
+            .AddItem("Free", 100 - cpuPct, Color.Green)
+        );
         // get cpu name
         grid.AddRow("CPU", $"[dim]{CpuHelper.GetProcessorCoreName()}[/]");
         // get os version
@@ -109,11 +33,21 @@ class Program
     static Panel MakeRamPanel(double usedPct, double usedGB, double totalGB)
     {
         var grid = new Grid().AddColumn().AddColumn();
-        grid.AddRow("Usage", $"{BuildBar(usedPct)} [{ColorForPct(usedPct)}]{usedPct,5:F1}%[/]");
+        // draw ram usage
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", usedPct, Color.Red)
+            .AddItem("Free", 100 - usedPct, Color.Green)
+        );
+        // show used / total in GB
         grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
         var (usedSlots, totalSlots, confSpeed) = RamHelper.GetMemoryInfo();
         grid.AddRow("Slot", $"{usedSlots}/{totalSlots}");
         grid.AddRow("Speed", $"{confSpeed} MHz");
+
         return new Panel(grid)
             .Header("[bold green]RAM[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
@@ -121,17 +55,23 @@ class Program
             .BorderColor(Color.Green);
     }
 
-    static Panel MakeGpuPanel(float gpuPct, bool available)
+    static Panel MakeGpuPanel()
     {
         var grid = new Grid().AddColumn().AddColumn();
-        grid.AddRow("3D Usage", $"{BuildBar(gpuPct)} [{ColorForPct(gpuPct)}]{gpuPct,5:F1}%[/]");
+        var gpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
+        // draw gpu usage
+        grid.AddRow(
+            new Markup("Usage"),
+            new BreakdownChart()
+            .ShowPercentage()
+            .Compact()
+            .AddItem("Used", gpuUsage, Color.Red)
+            .AddItem("Free", 100 - gpuUsage, Color.Green)
+        );
 
         var (gpuName, driverVer) = GpuHelper.GetGPUInfo();
         grid.AddRow("Name", gpuName);
         grid.AddRow("DriverVersion", driverVer);
-
-        var gpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
-        grid.AddRow("Total Usage", gpuUsage.ToString("0.000") + "%");
 
         return new Panel(grid)
             .Header("[bold yellow]GPU[/]", Justify.Center)
@@ -165,7 +105,7 @@ class Program
         // Placeholder ban đầu
         layout["CPU"].Update(MakeCpuPanel(0));
         layout["RAM"].Update(MakeRamPanel(0, 0, 0));
-        layout["GPU"].Update(MakeGpuPanel(0, false));
+        layout["GPU"].Update(MakeGpuPanel());
 
         // ── Bảng processes (tái sử dụng object, chỉ xóa rows) ─────────────
         var procTable = new Table().NoBorder().Expand();
@@ -183,8 +123,6 @@ class Program
         DateTime lastRefresh = DateTime.MinValue;
         List<Process> procs = [];
 
-        using var metrics = new SystemMetrics();
-
         AnsiConsole.Write(
             new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
                 .Header("Instructions", Justify.Center)
@@ -200,21 +138,19 @@ class Program
             {
                 while (true)
                 {
-                    bool needRefresh = (DateTime.Now - lastRefresh).TotalSeconds >= 3;
+                    bool needRefresh = (DateTime.Now - lastRefresh).TotalMilliseconds >= 1500;
 
                     if (needRefresh)
                     {
                         procs = [.. Process.GetProcesses()];
                         lastRefresh = DateTime.Now;
-                        metrics.Refresh();
 
-                        // Cập nhật panels stat
+                        // update stat panels
                         layout["CPU"].Update(MakeCpuPanel(CpuHelper.GetCpuUsage()));
-                        layout["RAM"].Update(MakeRamPanel(metrics.RamUsedPct,
-                                                          metrics.RamUsedGB,
-                                                          metrics.RamTotalGB));
-                        layout["GPU"].Update(MakeGpuPanel(metrics.GpuPct,
-                                                          metrics.GpuAvailable));
+                        var (totalGB, _, usedPct) = RamHelper.GetMemoryStatus();
+                        double usedGB = totalGB * usedPct / 100.0;
+                        layout["RAM"].Update(MakeRamPanel(usedPct, usedGB, totalGB));
+                        layout["GPU"].Update(MakeGpuPanel());
                     }
 
                     // ── Lọc danh sách ─────────────────────────────────────
@@ -332,7 +268,7 @@ class Program
                     }
 
                     ctx.Refresh();
-                    Task.Delay(100).Wait();
+                    Thread.Sleep(200);
                 }
             });
     }
