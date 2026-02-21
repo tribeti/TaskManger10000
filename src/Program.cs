@@ -7,9 +7,7 @@ namespace src;
 class SystemMetrics : IDisposable
 {
     private readonly PerformanceCounter _cpuCounter;
-    private readonly PerformanceCounter _ramCounter;
     private PerformanceCounter[]? _gpuCounters;
-
     public float CpuPct { get; private set; }
     public double RamUsedPct { get; private set; }
     public double RamTotalGB { get; private set; }
@@ -20,7 +18,6 @@ class SystemMetrics : IDisposable
     public SystemMetrics()
     {
         _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
-        _ramCounter = new PerformanceCounter("Memory", "Available MBytes");
         _cpuCounter.NextValue();
 
         try
@@ -70,7 +67,6 @@ class SystemMetrics : IDisposable
     public void Dispose()
     {
         _cpuCounter.Dispose();
-        _ramCounter.Dispose();
         if (_gpuCounters is not null)
             foreach (var c in _gpuCounters)
                 c.Dispose();
@@ -79,7 +75,8 @@ class SystemMetrics : IDisposable
 
 class Program
 {
-    // ── Helpers vẽ gauge / bar ─────────────────────────────────────────────
+    // update : use breakdown chart instead of gauge to show more info, and also add color
+    // https://spectreconsole.net/console/widgets/breakdown-chart
     static string ColorForPct(double pct) =>
         pct >= 80 ? "red" : pct >= 50 ? "yellow" : "green";
 
@@ -212,7 +209,7 @@ class Program
                         metrics.Refresh();
 
                         // Cập nhật panels stat
-                        layout["CPU"].Update(MakeCpuPanel(metrics.CpuPct));
+                        layout["CPU"].Update(MakeCpuPanel(CpuHelper.GetCpuUsage()));
                         layout["RAM"].Update(MakeRamPanel(metrics.RamUsedPct,
                                                           metrics.RamUsedGB,
                                                           metrics.RamTotalGB));
