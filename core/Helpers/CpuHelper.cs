@@ -49,4 +49,29 @@ public class CpuHelper
         Thread.Sleep(500);
         return coreCounter.NextValue();
     }
+
+    public static string GetOSName()
+    {
+        string productName = "";
+        string displayVersion = "";
+
+        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
+            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+        {
+            productName = key.GetValue("ProductName")?.ToString();
+            displayVersion = key.GetValue("DisplayVersion")?.ToString();
+        }
+
+        return productName + " " + displayVersion;
+    }
+
+    public static TimeSpan GetUptime()
+    {
+        // Source - https://stackoverflow.com/a/66459322
+        // Posted by Steven Rands
+        // Retrieved 2026-02-28, License - CC BY-SA 4.0
+
+        long tickCountMs = Environment.TickCount64;
+        return TimeSpan.FromMilliseconds(tickCountMs);
+    }
 }

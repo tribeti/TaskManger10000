@@ -3,7 +3,7 @@ using Spectre.Console;
 using System.Diagnostics;
 
 namespace src;
-
+// TODO : add disk io, network, cpu temp (total & per core), gpu temp, update live table async.
 class Program
 {
     static Panel MakeCpuPanel(double cpuPct)
@@ -21,7 +21,9 @@ class Program
         // get cpu name
         grid.AddRow("CPU", $"[dim]{CpuHelper.GetProcessorCoreName()}[/]");
         // get os version
-        grid.AddRow("OS Version", $"[dim]{Environment.OSVersion}[/]");
+        grid.AddRow("OS Version", $"[dim]{CpuHelper.GetOSName()}[/]");
+        // get uptime
+        grid.AddRow("Uptime", $"[dim]{CpuHelper.GetUptime():dd\\.hh\\:mm\\:ss}[/]");
 
         return new Panel(grid)
             .Header("[bold cyan]CPU[/]", Justify.Center)
@@ -68,7 +70,7 @@ class Program
 
         var (gpuName, driverVer) = GpuHelper.GetGPUInfo();
         grid.AddRow("Name", gpuName);
-        grid.AddRow("DriverVersion", driverVer);
+        grid.AddRow("Driver Version", driverVer);
 
         return new Panel(grid)
             .Header("[bold yellow]GPU[/]", Justify.Center)
@@ -88,27 +90,31 @@ class Program
     {
         const int pageSize = 10;
 
-        // ── Build layout (một lần duy nhất) ───────────────────────────────
+        // create process table
+        var procTable = new Table().NoBorder().Expand();
+        procTable.AddColumn(new TableColumn("[bold]PID[/]"));
+        procTable.AddColumn(new TableColumn("[bold]Name[/]"));
+        procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
+
         var layout = new Layout("Root")
             .SplitRows(
                 new Layout("Stat").Ratio(2),
-                new Layout("Process").Ratio(3));
+                new Layout("Process").Ratio(3),
+                new Layout("Intro").Ratio(1));
 
         layout["Stat"].SplitColumns(
             new Layout("CPU").Ratio(1),
             new Layout("RAM").Ratio(1),
             new Layout("GPU").Ratio(1));
 
-        // Placeholder ban đầu
+        // Initial state
         layout["CPU"].Update(MakeCpuPanel(0));
         layout["RAM"].Update(MakeRamPanel(0, 0, 0));
         layout["GPU"].Update(MakeGpuPanel());
-
-        // ── Bảng processes (tái sử dụng object, chỉ xóa rows) ─────────────
-        var procTable = new Table().NoBorder().Expand();
-        procTable.AddColumn(new TableColumn("[bold]PID[/]"));
-        procTable.AddColumn(new TableColumn("[bold]Name[/]"));
-        procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
+        layout["Intro"]
+            .Update(new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
+            .Border(BoxBorder.None)
+            .Collapse());
         layout["Process"].Update(MakeProcessPanel(procTable));
 
         // ── Trạng thái ────────────────────────────────────────────────────
@@ -120,12 +126,6 @@ class Program
         DateTime lastRefresh = DateTime.MinValue;
         List<Process> procs = [];
 
-        AnsiConsole.Write(
-            new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
-                .Header("Instructions", Justify.Center)
-                .Border(BoxBorder.Rounded));
-        AnsiConsole.WriteLine();
-
         // ── Live render trực tiếp vào layout ──────────────────────────────
         AnsiConsole.Live(layout)
             .AutoClear(false)
@@ -135,7 +135,7 @@ class Program
             {
                 while (true)
                 {
-                    bool needRefresh = (DateTime.Now - lastRefresh).TotalMilliseconds >= 1500;
+                    bool needRefresh = (DateTime.Now - lastRefresh).TotalMilliseconds >= 500;
 
                     if (needRefresh)
                     {
@@ -157,7 +157,6 @@ class Program
                               p.ProcessName.Contains(searchQuery,
                                   StringComparison.OrdinalIgnoreCase))];
 
-                    // ── Sắp xếp ───────────────────────────────────────────
                     filtered = sortMode switch
                     {
                         SortMode.NameAsc => [.. filtered.OrderBy(p => p.ProcessName)],

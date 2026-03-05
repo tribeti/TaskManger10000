@@ -51,6 +51,7 @@ public class GpuHelper
 
             var name = subKey.GetValue("DriverDesc")?.ToString();
             var driver = subKey.GetValue("DriverVersion")?.ToString();
+            driver = driver?.Replace(".", "")[^5..].Insert(2, ".");
 
             if (!string.IsNullOrEmpty(name))
             {
