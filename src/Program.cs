@@ -3,9 +3,11 @@ using Spectre.Console;
 using System.Diagnostics;
 
 namespace src;
-// TODO : add disk io, network, cpu temp (total & per core), gpu temp, update live table async.
+// TODO : add disk io, network, cpu temp (total & per core), gpu temp
 class Program
 {
+    public record ProcessInfo(int Id, string Name, double MemoryMB);
+    public enum SortMode { NameAsc, MemoryDesc }
     static Panel MakeCpuPanel(double cpuPct)
     {
         var grid = new Grid().AddColumn().AddColumn();
@@ -54,43 +56,26 @@ class Program
             .BorderColor(Color.Green);
     }
 
-    static Panel MakeGpuPanel()
+    static Panel MakeGpuPanel(double gpuUsage, string gpuName, string driverVer)
     {
         var grid = new Grid().AddColumn().AddColumn();
-        var gpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
-        // draw gpu usage
         grid.AddRow(
             new Markup("Usage"),
             new BreakdownChart()
-            .ShowPercentage()
-            .Compact()
-            .AddItem("Used", gpuUsage, Color.Red)
-            .AddItem("Free", 100 - gpuUsage, Color.Green)
+                .ShowPercentage().Compact()
+                .AddItem("Used", gpuUsage, Color.Red)
+                .AddItem("Free", 100 - gpuUsage, Color.Green)
         );
-
-        var (gpuName, driverVer) = GpuHelper.GetGPUInfo();
         grid.AddRow("Name", gpuName);
         grid.AddRow("Driver Version", driverVer);
 
         return new Panel(grid)
             .Header("[bold yellow]GPU[/]", Justify.Center)
-            .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Yellow);
+            .Border(BoxBorder.Rounded).Expand().BorderColor(Color.Yellow);
     }
-
-    static Panel MakeProcessPanel(Table tbl) =>
-        new Panel(tbl)
-            .Header("[bold white]Processes[/]", Justify.Center)
-            .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Grey);
 
     static void Main()
     {
-        const int pageSize = 10;
-
-        // create process table
         var procTable = new Table().NoBorder().Expand();
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
@@ -107,67 +92,71 @@ class Program
             new Layout("RAM").Ratio(1),
             new Layout("GPU").Ratio(1));
 
-        // Initial state
-        layout["CPU"].Update(MakeCpuPanel(0));
-        layout["RAM"].Update(MakeRamPanel(0, 0, 0));
-        layout["GPU"].Update(MakeGpuPanel());
-        layout["Intro"]
-            .Update(new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear search | [red]Q[/]: Quit")
-            .Border(BoxBorder.None)
-            .Collapse());
-        layout["Process"].Update(MakeProcessPanel(procTable));
+        layout["Intro"].Update(
+            new Panel("[green]K[/]: Kill | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
+                .Border(BoxBorder.None).Collapse());
 
-        // ── Trạng thái ────────────────────────────────────────────────────
-        int selectedIndex = 0;
-        int scrollOffset = 0;
+        const int pageSize = 10;
+        int selectedIndex = 0, scrollOffset = 0;
         SortMode sortMode = SortMode.MemoryDesc;
         string searchQuery = "";
         bool searchMode = false;
-        DateTime lastRefresh = DateTime.MinValue;
-        List<Process> procs = [];
 
-        // ── Live render trực tiếp vào layout ──────────────────────────────
+        List<ProcessInfo> cachedProcs = [];
+        List<ProcessInfo> filtered = [];
+
+        double currentCpu = 0;
+        (double totalGB, double freeGB, double usedPct) currentRam = (0, 0, 0);
+        double currentGpuUsage = 0;
+        string gpuName = "", gpuDriver = "";
+
+        bool statDirty = true;
+        bool procDirty = true;
+        bool dataChanged = true;
+
+        (gpuName, gpuDriver) = GpuHelper.GetGPUInfo();
+
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                currentCpu = CpuHelper.GetCpuUsage();
+                currentRam = RamHelper.GetMemoryStatus();
+                currentGpuUsage = GpuHelper.GetGPUUsage(GpuHelper.GetGPUCounters());
+                statDirty = true;
+                await Task.Delay(500);
+            }
+        });
+
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                var procs = Process.GetProcesses();
+                var newList = new List<ProcessInfo>(procs.Length);
+                foreach (var p in procs)
+                {
+                    try
+                    { newList.Add(new ProcessInfo(p.Id, p.ProcessName, p.WorkingSet64 / 1048576.0)); }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+                cachedProcs = newList;
+                dataChanged = true;
+                await Task.Delay(1000);
+            }
+        });
+
+        // ── Main render loop ─────────────────────
         AnsiConsole.Live(layout)
             .AutoClear(false)
             .Overflow(VerticalOverflow.Ellipsis)
-            .Cropping(VerticalOverflowCropping.Bottom)
             .Start(ctx =>
             {
                 while (true)
                 {
-                    bool needRefresh = (DateTime.Now - lastRefresh).TotalMilliseconds >= 500;
-
-                    if (needRefresh)
-                    {
-                        procs = [.. Process.GetProcesses()];
-                        lastRefresh = DateTime.Now;
-
-                        // update stat panels
-                        layout["CPU"].Update(MakeCpuPanel(CpuHelper.GetCpuUsage()));
-                        var (totalGB, _, usedPct) = RamHelper.GetMemoryStatus();
-                        double usedGB = totalGB * usedPct / 100.0;
-                        layout["RAM"].Update(MakeRamPanel(usedPct, usedGB, totalGB));
-                        layout["GPU"].Update(MakeGpuPanel());
-                    }
-
-                    // ── Lọc danh sách ─────────────────────────────────────
-                    var filtered = string.IsNullOrEmpty(searchQuery)
-                        ? procs
-                        : [.. procs.Where(p =>
-                              p.ProcessName.Contains(searchQuery,
-                                  StringComparison.OrdinalIgnoreCase))];
-
-                    filtered = sortMode switch
-                    {
-                        SortMode.NameAsc => [.. filtered.OrderBy(p => p.ProcessName)],
-                        SortMode.MemoryDesc => [.. filtered.OrderByDescending(p => p.WorkingSet64)],
-                        _ => filtered
-                    };
-
-                    selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, filtered.Count - 1));
-
-                    // ── Đọc phím ──────────────────────────────────────────
-                    if (Console.KeyAvailable)
+                    bool inputChanged = false;
+                    while (Console.KeyAvailable)
                     {
                         var ki = Console.ReadKey(true);
                         var key = ki.Key;
@@ -175,16 +164,13 @@ class Program
                         if (searchMode)
                         {
                             if (key == ConsoleKey.Escape)
-                            {
-                                searchMode = false;
-                                searchQuery = "";
-                            }
+                            { searchMode = false; searchQuery = ""; inputChanged = true; }
                             else if (key == ConsoleKey.Backspace && searchQuery.Length > 0)
-                                searchQuery = searchQuery[..^1];
+                            { searchQuery = searchQuery[..^1]; inputChanged = true; }
                             else if (key == ConsoleKey.Enter)
-                                searchMode = false;
+                            { searchMode = false; procDirty = true; }
                             else if (!char.IsControl(ki.KeyChar))
-                                searchQuery += ki.KeyChar;
+                            { searchQuery += ki.KeyChar; inputChanged = true; }
                         }
                         else
                         {
@@ -194,85 +180,116 @@ class Program
                                 selectedIndex = Math.Max(0, selectedIndex - 1);
                                 if (selectedIndex < scrollOffset)
                                     scrollOffset = selectedIndex;
+                                inputChanged = true;
                                 break;
-
                                 case ConsoleKey.DownArrow:
-                                selectedIndex = Math.Min(filtered.Count - 1, selectedIndex + 1);
+                                selectedIndex = Math.Min(Math.Max(0, filtered.Count - 1), selectedIndex + 1);
                                 if (selectedIndex >= scrollOffset + pageSize)
                                     scrollOffset = selectedIndex - pageSize + 1;
+                                inputChanged = true;
                                 break;
-
                                 case ConsoleKey.K:
                                 if (filtered.Count > 0)
                                 {
-                                    KillProcess(filtered[selectedIndex]);
-                                    Task.Delay(100).Wait();
-                                    procs = [.. Process.GetProcesses()];
-                                    lastRefresh = DateTime.Now;
+                                    try
+                                    { Process.GetProcessById(filtered[selectedIndex].Id).Kill(); }
+                                    catch { }
+                                    inputChanged = true;
                                 }
                                 break;
-
                                 case ConsoleKey.S:
-                                sortMode = sortMode == SortMode.MemoryDesc
-                                           ? SortMode.NameAsc
-                                           : SortMode.MemoryDesc;
+                                sortMode = sortMode == SortMode.MemoryDesc ? SortMode.NameAsc : SortMode.MemoryDesc;
+                                inputChanged = true;
                                 break;
-
                                 case ConsoleKey.F:
                                 searchMode = true;
                                 searchQuery = "";
+                                inputChanged = true;
                                 break;
-
                                 case ConsoleKey.Q:
                                 return;
                             }
                         }
                     }
 
-                    // ── Cập nhật bảng processes ───────────────────────────
-                    procTable.Rows.Clear();
-
-                    if (searchMode || !string.IsNullOrEmpty(searchQuery))
-                        procTable.Caption = new TableTitle(
-                            $"[yellow]Search: {searchQuery}{(searchMode ? "_" : "")}[/]" +
-                            $" ([dim]{filtered.Count} results[/])");
-                    else
-                        procTable.Caption = null;
-
-                    var visible = filtered.Skip(scrollOffset).Take(pageSize).ToList();
-                    for (int i = 0; i < visible.Count; i++)
+                    if (dataChanged || inputChanged)
                     {
-                        var p = visible[i];
-                        int realIdx = scrollOffset + i;
-                        bool sel = realIdx == selectedIndex;
+                        var snapshot = cachedProcs;
+                        var query = string.IsNullOrEmpty(searchQuery)
+                            ? snapshot
+                            : snapshot.Where(p => p.Name.Contains(searchQuery, StringComparison.OrdinalIgnoreCase));
 
-                        string pid = p.Id.ToString();
-                        string name = p.ProcessName;
-                        double mb = p.WorkingSet64 / 1024.0 / 1024.0;
-                        string memColored = mb > 500
-                            ? $"[red]{mb:N2}[/]"
-                            : mb > 300
-                                ? $"[yellow]{mb:N2}[/]"
-                                : $"[green]{mb:N2}[/]";
+                        filtered = sortMode switch
+                        {
+                            SortMode.NameAsc => query.OrderBy(p => p.Name).ToList(),
+                            SortMode.MemoryDesc => query.OrderByDescending(p => p.MemoryMB).ToList(),
+                            _ => query.ToList()
+                        };
 
-                        if (sel)
-                            procTable.AddRow($"[black on white]{pid}[/]",
-                                             $"[black on white]{name}[/]",
-                                             $"[black on white]{mb:N2}[/]");
-                        else
-                            procTable.AddRow(pid, name, memColored);
+                        selectedIndex = Math.Clamp(selectedIndex, 0, Math.Max(0, filtered.Count - 1));
+                        dataChanged = false;
+                        procDirty = true;
                     }
 
-                    ctx.Refresh();
-                    Thread.Sleep(200);
+                    bool refreshed = false;
+
+                    if (statDirty)
+                    {
+                        layout["CPU"].Update(MakeCpuPanel(currentCpu));
+                        layout["RAM"].Update(MakeRamPanel(
+                            currentRam.usedPct,
+                            currentRam.totalGB * currentRam.usedPct / 100.0,
+                            currentRam.totalGB));
+                        layout["GPU"].Update(MakeGpuPanel(currentGpuUsage, gpuName, gpuDriver));
+                        statDirty = false;
+                        refreshed = true;
+                    }
+
+                    if (procDirty || inputChanged)
+                    {
+                        procTable.Rows.Clear();
+
+                        if (searchMode || !string.IsNullOrEmpty(searchQuery))
+                            procTable.Caption = new TableTitle(
+                                $"[yellow]Search: {searchQuery}{(searchMode ? "_" : "")}[/] ([dim]{filtered.Count} results[/])");
+                        else
+                            procTable.Caption = null;
+
+                        var visible = filtered.Skip(scrollOffset).Take(pageSize).ToList();
+                        for (int i = 0; i < visible.Count; i++)
+                        {
+                            var p = visible[i];
+                            bool sel = (scrollOffset + i) == selectedIndex;
+
+                            if (sel)
+                                procTable.AddRow(
+                                    $"[black on white]{p.Id}[/]",
+                                    $"[black on white]{p.Name}[/]",
+                                    $"[black on white]{p.MemoryMB:N2}[/]");
+                            else
+                            {
+                                string memColored = p.MemoryMB > 500
+                                    ? $"[red]{p.MemoryMB:N2}[/]"
+                                    : p.MemoryMB > 300
+                                        ? $"[yellow]{p.MemoryMB:N2}[/]"
+                                        : $"[green]{p.MemoryMB:N2}[/]";
+
+                                procTable.AddRow(
+                                    p.Id.ToString(),
+                                    Markup.Escape(p.Name),
+                                    memColored);
+                            }
+                        }
+
+                        layout["Process"].Update(new Panel(procTable).Expand());
+                        procDirty = false;
+                        refreshed = true;
+                    }
+
+                    if (refreshed)
+                        ctx.Refresh();
+                    Thread.Sleep(16);
                 }
             });
-    }
-
-    static void KillProcess(Process p)
-    {
-        try
-        { p.Kill(); p.WaitForExit(1000); }
-        catch { }
     }
 }
