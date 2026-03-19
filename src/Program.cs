@@ -10,7 +10,6 @@ class Program
 {
     static double _currentCpu = 0;
     static double _currentGpuUsage = 0;
-    static volatile IReadOnlyList<float> _currentCoreUsages = [];
 
     static (double totalGB, double freeGB, double usedPct) _currentRam;
     static readonly object _ramLock = new();
@@ -39,6 +38,8 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
+        procTable.AddColumn(new TableColumn("[bold]Cpu Usage[/]").RightAligned());
+        procTable.AddColumn(new TableColumn("[bold]Disk Usage[/]").RightAligned());
 
         var layout = new Layout("Root")
             .SplitRows(
@@ -50,6 +51,10 @@ class Program
             new Layout("CPU").Ratio(1),
             new Layout("RAM").Ratio(1),
             new Layout("GPU").Ratio(1));
+
+        layout["Process"].SplitColumns(
+            new Layout("Table").Ratio(7),
+            new Layout("Info").Ratio(3));
 
         layout["Intro"].Update(
             new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
@@ -67,7 +72,6 @@ class Program
             while (true)
             {
                 _currentCpu = cpu.GetUsage();
-                _currentCoreUsages = cpu.GetPerCoreUsage();
                 _currentGpuUsage = gpu.GetGPUUsage();
 
                 var ram = RamHelper.GetMemoryStatus();
@@ -185,7 +189,7 @@ class Program
                         lock (_ramLock)
                         { ram = _currentRam; }
 
-                        layout["CPU"].Update(CpuPanel.Build(_currentCpu, cpuName, osName, _currentCoreUsages));
+                        layout["CPU"].Update(CpuPanel.Build(_currentCpu, cpuName, osName));
                         layout["RAM"].Update(RamPanel.Build(
                             ram.usedPct,
                             ram.totalGB * ram.usedPct / 100.0,
@@ -217,7 +221,10 @@ class Program
                                 procTable.AddRow(
                                     $"[black on white]{p.Id}[/]",
                                     $"[black on white]{p.Name}[/]",
-                                    $"[black on white]{p.MemoryUsage:N2}[/]");
+                                    $"[black on white]{p.MemoryUsage:N2}[/]",
+                                    $"[black on white]{p.CpuUsage:N2}[/]",
+                                    $"[black on white]{p.DiskUsage:N2}[/]"
+                                );
                             }
                             else
                             {
@@ -227,11 +234,14 @@ class Program
                                 procTable.AddRow(
                                     p.Id.ToString(),
                                     Markup.Escape(p.Name),
-                                    $"[{memColor}]{p.MemoryUsage:N2}[/]");
+                                    $"[{memColor}]{p.MemoryUsage:N2}[/]",
+                                    $"[bold]{p.CpuUsage:N2}[/]",
+                                    $"[bold]{p.DiskUsage}[/]"
+                                );
                             }
                         }
 
-                        layout["Process"].Update(new Panel(procTable).Expand());
+                        layout["Table"].Update(new Panel(procTable).Expand());
                         _procDirty = false;
                         refreshed = true;
                     }

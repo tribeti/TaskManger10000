@@ -20,7 +20,8 @@ public class ProcessMonitor
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
                     CpuUsage: 0,
-                    Status: p.Responding ? "Running" : "Not Responding"
+                    DiskUsage: "N/A",
+                    NetworkUsage: "N/A"
                 ));
             }
             catch { }

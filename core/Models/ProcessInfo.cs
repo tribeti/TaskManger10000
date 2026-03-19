@@ -5,5 +5,6 @@ public record ProcessInfo(
     string Name,
     double MemoryUsage,
     double CpuUsage,
-    string Status
+    string DiskUsage,
+    string NetworkUsage
 );
