@@ -7,27 +7,44 @@ namespace core.Helpers;
 // Posted by Fidel, modified by community. See post 'Timeline' for change history
 // Retrieved 2026-02-18, License - CC BY-SA 4.0
 
-public class GpuHelper
+public class GpuHelper : IDisposable
 {
-    public static List<PerformanceCounter> GetGPUCounters()
+    private readonly List<PerformanceCounter> _counters;
+    private bool _disposed;
+
+    public GpuHelper()
     {
-        var category = new PerformanceCounterCategory("GPU Engine");
-        var counterNames = category.GetInstanceNames();
-
-        var gpuCounters = counterNames
-                            .Where(counterName => counterName.EndsWith("engtype_3D"))
-                            .SelectMany(counterName => category.GetCounters(counterName))
-                            .Where(counter => counter.CounterName.Equals("Utilization Percentage"))
-                            .ToList();
-
-        return gpuCounters;
+        _counters = InitCounters();
     }
 
-    public static double GetGPUUsage(List<PerformanceCounter> gpuCounters)
+    public static List<PerformanceCounter> InitCounters()
     {
-        gpuCounters.ForEach(x => x.NextValue());
-        Thread.Sleep(1000);
-        return Math.Round(gpuCounters.Sum(x => x.NextValue()), 1);
+        try
+        {
+            var category = new PerformanceCounterCategory("GPU Engine");
+            var counterNames = category.GetInstanceNames();
+
+            var gpuCounters = counterNames
+                                .Where(counterName => counterName.EndsWith("engtype_3D"))
+                                .SelectMany(counterName => category.GetCounters(counterName))
+                                .Where(counter => counter.CounterName.Equals("Utilization Percentage"))
+                                .ToList();
+
+            return gpuCounters;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public void WarmUp() => _counters.ForEach(c => c.NextValue());
+
+    public double GetGPUUsage()
+    {
+        if (_counters.Count == 0)
+            return 0;
+        return Math.Round(_counters.Sum(c => c.NextValue()), 1);
     }
 
     // not tested on multi-GPU systems, but should return the first GPU's info (maybe igpu idk)
@@ -61,5 +78,14 @@ public class GpuHelper
             }
         }
         return (gpuName, driverVer);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _counters.ForEach(c => c.Dispose());
+        _counters.Clear();
+        _disposed = true;
     }
 }

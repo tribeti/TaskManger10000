@@ -3,8 +3,37 @@ using System.Diagnostics;
 
 namespace core.Helpers;
 // get cpu usage by each core
-public class CpuHelper
+public class CpuHelper : IDisposable
 {
+    private readonly PerformanceCounter _totalCounter;
+    private readonly List<PerformanceCounter> _coreCounters;
+    private bool _disposed;
+
+    public CpuHelper()
+    {
+        _totalCounter = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total");
+        var category = new PerformanceCounterCategory("Processor Information");
+        _coreCounters = [];
+        var instances = category.GetInstanceNames()
+            .Where(i => !i.Contains("_Total"))
+            .OrderBy(i => int.Parse(i.Split(',')[^1]));
+        foreach (var instance in instances)
+        {
+            _coreCounters.Add(new PerformanceCounter("Processor Information", "% Processor Utility", instance));
+        }
+    }
+
+    public void WarmUp()
+    {
+        _totalCounter.NextValue();
+        _coreCounters.ForEach(c => c.NextValue());
+    }
+
+    public double GetUsage() => Math.Round(_totalCounter.NextValue(), 1);
+
+    public IReadOnlyList<float> GetPerCoreUsage() => _coreCounters.Select(c => c.NextValue()).ToList();
+
+
     public static string GetProcessorCoreName()
     {
         try
@@ -55,8 +84,7 @@ public class CpuHelper
         string productName = "";
         string displayVersion = "";
 
-        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(
-            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
         {
             productName = key.GetValue("ProductName")?.ToString();
             displayVersion = key.GetValue("DisplayVersion")?.ToString();
@@ -65,13 +93,18 @@ public class CpuHelper
         return productName + " " + displayVersion;
     }
 
-    public static TimeSpan GetUptime()
-    {
-        // Source - https://stackoverflow.com/a/66459322
-        // Posted by Steven Rands
-        // Retrieved 2026-02-28, License - CC BY-SA 4.0
+    // Source - https://stackoverflow.com/a/66459322
+    // Posted by Steven Rands
+    // Retrieved 2026-02-28, License - CC BY-SA 4.0
+    public static TimeSpan GetUptime() => TimeSpan.FromMilliseconds(Environment.TickCount64);
 
-        long tickCountMs = Environment.TickCount64;
-        return TimeSpan.FromMilliseconds(tickCountMs);
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _totalCounter.Dispose();
+        _coreCounters.ForEach(c => c.Dispose());
+        _coreCounters.Clear();
+        _disposed = true;
     }
 }
