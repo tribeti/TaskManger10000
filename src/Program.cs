@@ -150,9 +150,12 @@ class Program
                                 break;
 
                                 case ConsoleKey.S:
-                                sortMode = sortMode == SortMode.MemoryDesc
-                                    ? SortMode.NameAsc
-                                    : SortMode.MemoryDesc;
+                                sortMode = sortMode switch
+                                {
+                                    SortMode.MemoryDesc => SortMode.CpuDesc,
+                                    SortMode.CpuDesc => SortMode.NameAsc,
+                                    _ => SortMode.MemoryDesc
+                                };
                                 inputChanged = true;
                                 break;
 

@@ -50,7 +50,10 @@ public class ProcessMonitor
     public void Kill(int pid)
     {
         try
-        { Process.GetProcessById(pid).Kill(); }
+        {
+            using var p = Process.GetProcessById(pid);
+            p.Kill();
+        }
         catch { }
     }
 
