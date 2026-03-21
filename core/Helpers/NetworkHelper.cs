@@ -24,7 +24,7 @@ public class NetworkHelper : IDisposable
         long prevBytesReceived = activeCard.GetIPv4Statistics().BytesReceived;
         long prevBytesSent = activeCard.GetIPv4Statistics().BytesSent;
 
-        Ping pingSender = new Ping();
+        using Ping pingSender = new Ping();
         string hostToPing = "8.8.8.8";
         int timeout = 1000;
 

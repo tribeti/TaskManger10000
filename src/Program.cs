@@ -223,7 +223,7 @@ class Program
                                     $"[black on white]{p.Name}[/]",
                                     $"[black on white]{p.MemoryUsage:N2}[/]",
                                     $"[black on white]{p.CpuUsage:N2}[/]",
-                                    $"[black on white]{p.DiskUsage:N2}[/]"
+                                    $"[black on white]{p.DiskUsage}[/]"
                                 );
                             }
                             else
