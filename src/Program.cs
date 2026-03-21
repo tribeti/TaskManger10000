@@ -10,9 +10,11 @@ class Program
 {
     static double _currentCpu = 0;
     static double _currentGpuUsage = 0;
+    static (string name, double speed, double rx, double tx, double util) _currentNetwork;
 
     static (double totalGB, double freeGB, double usedPct) _currentRam;
     static readonly object _ramLock = new();
+    static readonly object _networkLock = new();
 
     static volatile bool _statDirty = true;
     static volatile bool _procDirty = true;
@@ -23,6 +25,7 @@ class Program
         // ── Init ─────────────────────────────────────────────
         using var cpu = new CpuHelper();
         using var gpu = new GpuHelper();
+        using var network = new NetworkHelper();
         var procMonitor = new ProcessMonitor();
 
         string cpuName = CpuHelper.GetProcessorCoreName();
@@ -37,9 +40,8 @@ class Program
         var procTable = new Table().NoBorder().Expand();
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
-        procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").RightAligned());
+        procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
         procTable.AddColumn(new TableColumn("[bold]Cpu Usage[/]").RightAligned());
-        procTable.AddColumn(new TableColumn("[bold]Disk Usage[/]").RightAligned());
 
         var layout = new Layout("Root")
             .SplitRows(
@@ -55,6 +57,10 @@ class Program
         layout["Process"].SplitColumns(
             new Layout("Table").Ratio(7),
             new Layout("Info").Ratio(3));
+
+        layout["Info"].SplitRows(
+            new Layout("Network").Ratio(1),
+            new Layout("Spacer").Ratio(1));
 
         layout["Intro"].Update(
             new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
@@ -189,12 +195,17 @@ class Program
                         lock (_ramLock)
                         { ram = _currentRam; }
 
+                        (string name, double speed, double rx, double tx, double util) net;
+                        lock (_networkLock)
+                        { net = _currentNetwork; }
+
                         layout["CPU"].Update(CpuPanel.Build(_currentCpu, cpuName, osName));
                         layout["RAM"].Update(RamPanel.Build(
                             ram.usedPct,
                             ram.totalGB * ram.usedPct / 100.0,
                             ram.totalGB));
                         layout["GPU"].Update(GpuPanel.Build(_currentGpuUsage, gpuName, gpuDriver));
+                        //layout["Network"].Update(NetworkPanel.Build());
 
                         _statDirty = false;
                         refreshed = true;
@@ -222,8 +233,7 @@ class Program
                                     $"[black on white]{p.Id}[/]",
                                     $"[black on white]{p.Name}[/]",
                                     $"[black on white]{p.MemoryUsage:N2}[/]",
-                                    $"[black on white]{p.CpuUsage:N2}[/]",
-                                    $"[black on white]{p.DiskUsage}[/]"
+                                    $"[black on white]{p.CpuUsage:N2}[/]"
                                 );
                             }
                             else
@@ -235,8 +245,7 @@ class Program
                                     p.Id.ToString(),
                                     Markup.Escape(p.Name),
                                     $"[{memColor}]{p.MemoryUsage:N2}[/]",
-                                    $"[bold]{p.CpuUsage:N2}[/]",
-                                    $"[bold]{p.DiskUsage}[/]"
+                                    $"[bold]{p.CpuUsage:N2}[/]"
                                 );
                             }
                         }

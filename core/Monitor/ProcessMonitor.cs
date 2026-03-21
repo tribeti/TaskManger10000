@@ -19,9 +19,7 @@ public class ProcessMonitor
                     Id: p.Id,
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: 0,
-                    DiskUsage: "N/A",
-                    NetworkUsage: "N/A"
+                    CpuUsage: 0
                 ));
             }
             catch { }
