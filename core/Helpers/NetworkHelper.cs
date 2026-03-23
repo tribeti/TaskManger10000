@@ -53,12 +53,6 @@ public class NetworkHelper : IDisposable
         return (p.Send("www.google.com").RoundtripTime, (lost * 100 / sent));
     }
 
-    public int GetActiveTcpConnections()
-    {
-        IPGlobalProperties properties = IPGlobalProperties.GetIPGlobalProperties();
-        return properties.GetActiveTcpConnections().Count(c => c.State == TcpState.Established);
-    }
-
     public void Dispose()
     {
         if (_disposed)

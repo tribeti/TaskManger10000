@@ -4,21 +4,18 @@ namespace src.Views;
 
 public static class NetworkPanel
 {
-    public static Panel Build(double sendSpeed, double recieveSpeed, long ping, int loss, int cons)
+    public static Panel Build(double sendSpeed, double recieveSpeed, long ping, int loss)
     {
         var grid = new Grid().AddColumn().AddColumn();
 
         grid.AddRow(
-            new Markup("Utilization"),
             new BarChart()
-            .Label("Internet Speed")
-            .AddItem("Used", sendSpeed, Color.Red)
+            .AddItem("Used", sendSpeed, Color.Blue)
             .AddItem("Free", recieveSpeed, Color.Green)
         );
 
         grid.AddRow("Ping", $"[bold]{ping:F0} ms[/]");
         grid.AddRow("Packet loss", $"[bold]{loss:F2} %[/]");
-        grid.AddRow("TCP Connections", $"[bold]{cons:F2}[/]");
 
         return new Panel(grid)
             .Header("[bold blue]Network[/]", Justify.Center)

@@ -10,11 +10,13 @@ class Program
 {
     static double _currentCpu = 0;
     static double _currentGpuUsage = 0;
-    static (string name, double speed, double rx, double tx, double util) _currentNetwork;
+    static (double send, double recieve) _currentNetwork;
+    static (long ping, int loss) _currentNetwork1;
 
     static (double totalGB, double freeGB, double usedPct) _currentRam;
     static readonly object _ramLock = new();
     static readonly object _networkLock = new();
+    static readonly object _networkLock1 = new();
 
     static volatile bool _statDirty = true;
     static volatile bool _procDirty = true;
@@ -60,7 +62,7 @@ class Program
 
         layout["Info"].SplitRows(
             new Layout("Network").Ratio(1),
-            new Layout("Spacer").Ratio(1));
+            new Layout("Disk").Ratio(1));
 
         layout["Intro"].Update(
             new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
@@ -83,6 +85,14 @@ class Program
                 var ram = RamHelper.GetMemoryStatus();
                 lock (_ramLock)
                 { _currentRam = ram; }
+
+                var net = network.NetworkSpeed();
+                lock (_networkLock)
+                { _currentNetwork = net; }
+
+                var net1 = network.GetPingAndPacketLoss();
+                lock (_networkLock1)
+                { _currentNetwork1 = net1; }
 
                 _statDirty = true;
                 await Task.Delay(1000);
@@ -195,9 +205,13 @@ class Program
                         lock (_ramLock)
                         { ram = _currentRam; }
 
-                        (string name, double speed, double rx, double tx, double util) net;
+                        (double send, double receive) net;
                         lock (_networkLock)
                         { net = _currentNetwork; }
+
+                        (long ping, int loss) net1;
+                        lock (_networkLock1)
+                        { net1 = _currentNetwork1; }
 
                         layout["CPU"].Update(CpuPanel.Build(_currentCpu, cpuName, osName));
                         layout["RAM"].Update(RamPanel.Build(
@@ -205,7 +219,7 @@ class Program
                             ram.totalGB * ram.usedPct / 100.0,
                             ram.totalGB));
                         layout["GPU"].Update(GpuPanel.Build(_currentGpuUsage, gpuName, gpuDriver));
-                        //layout["Network"].Update(NetworkPanel.Build());
+                        layout["Network"].Update(NetworkPanel.Build(net.send, net.receive, net1.ping, net1.loss));
 
                         _statDirty = false;
                         refreshed = true;
