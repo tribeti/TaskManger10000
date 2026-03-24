@@ -6,6 +6,22 @@ public class NetworkHelper : IDisposable
 {
     private bool _disposed;
 
+    private NetworkInterface[] _interfaces;
+    private long _lastBytesReceived;
+    private long _lastBytesSent;
+    private DateTime _lastMeasuredAt;
+
+    public NetworkHelper()
+    {
+        _interfaces = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
+            .ToArray();
+
+        _lastBytesReceived = GetTotalBytesReceived(_interfaces);
+        _lastBytesSent = GetTotalBytesSent(_interfaces);
+        _lastMeasuredAt = DateTime.UtcNow;
+    }
+
     static long GetTotalBytesReceived(NetworkInterface[] interfaces)
     {
         return interfaces.Sum(nic => nic.GetIPStatistics().BytesReceived);
@@ -16,23 +32,32 @@ public class NetworkHelper : IDisposable
         return interfaces.Sum(nic => nic.GetIPStatistics().BytesSent);
     }
 
-    public (double, double) NetworkSpeed()
+    public (double downloadKBps, double uploadKBps) NetworkSpeed()
     {
-        var interfaces = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
-            .ToArray();
+        long currentBytesReceived = GetTotalBytesReceived(_interfaces);
+        long currentBytesSent = GetTotalBytesSent(_interfaces);
+        DateTime now = DateTime.UtcNow;
 
-        long lastBytesReceived = GetTotalBytesReceived(interfaces);
-        long lastBytesSent = GetTotalBytesSent(interfaces);
-        long currentBytesReceived = GetTotalBytesReceived(interfaces);
-        long currentBytesSent = GetTotalBytesSent(interfaces);
+        double elapsedSeconds = (now - _lastMeasuredAt).TotalSeconds;
 
-        long receiveSpeed = currentBytesReceived - lastBytesReceived;
-        long sendSpeed = currentBytesSent - lastBytesSent;
-        return (receiveSpeed / 1024.0, sendSpeed / 1024.0);
+        double downloadKBps = 0;
+        double uploadKBps = 0;
+
+        if (elapsedSeconds > 0)
+        {
+
+            downloadKBps = Math.Round((currentBytesReceived - _lastBytesReceived) / 1024.0 / elapsedSeconds, 2);
+            uploadKBps = Math.Round((currentBytesSent - _lastBytesSent) / 1024.0 / elapsedSeconds, 2);
+        }
+
+        _lastBytesReceived = currentBytesReceived;
+        _lastBytesSent = currentBytesSent;
+        _lastMeasuredAt = now;
+
+        return (downloadKBps, uploadKBps);
     }
 
-    public (long, int) GetPingAndPacketLoss()
+    public (long roundtripMs, int packetLossPct) GetPingAndPacketLoss()
     {
         using Ping p = new();
         var options = new PingOptions { DontFragment = true };
@@ -43,14 +68,13 @@ public class NetworkHelper : IDisposable
         {
             sent++;
             PingReply reply = p.Send("8.8.8.8", 1000, buffer, options);
-
             if (reply.Status == IPStatus.Success)
-            {
                 received++;
-            }
         }
+
         int lost = sent - received;
-        return (p.Send("www.google.com").RoundtripTime, (lost * 100 / sent));
+        long rtt = p.Send("www.google.com").RoundtripTime;
+        return (rtt, lost * 100 / sent);
     }
 
     public void Dispose()

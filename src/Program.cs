@@ -219,7 +219,7 @@ class Program
                             ram.totalGB * ram.usedPct / 100.0,
                             ram.totalGB));
                         layout["GPU"].Update(GpuPanel.Build(_currentGpuUsage, gpuName, gpuDriver));
-                        layout["Network"].Update(NetworkPanel.Build(net.send, net.receive, net1.ping, net1.loss));
+                        layout["Network"].Update(NetworkPanel.Build(net.receive, net.send, net1.ping, net1.loss));
 
                         _statDirty = false;
                         refreshed = true;

@@ -10,8 +10,8 @@ public static class NetworkPanel
 
         grid.AddRow(
             new BarChart()
-            .AddItem("Used", sendSpeed, Color.Blue)
-            .AddItem("Free", recieveSpeed, Color.Green)
+            .AddItem("Upload (Kbps)", sendSpeed, Color.Blue)
+            .AddItem("Download (Kbps)", recieveSpeed, Color.Green)
         );
 
         grid.AddRow("Ping", $"[bold]{ping:F0} ms[/]");
