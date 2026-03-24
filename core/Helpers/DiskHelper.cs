@@ -2,57 +2,76 @@
 
 namespace core.Helpers;
 
+public record DiskMetrics(double ReadMbps, double WriteMbps, double Iops, double LatencyMs);
+
+public record DriveMetrics(string Name, string Format, double UsedGB, double TotalGB, double UsedPct);
+
 public class DiskHelper : IDisposable
 {
+    private readonly PerformanceCounter _readCounter;
+    private readonly PerformanceCounter _writeCounter;
+    private readonly PerformanceCounter _iopsCounter;
+    private readonly PerformanceCounter _latencyCounter;
     private bool _disposed;
 
-    public void GetDiskUsage()
+    public DiskHelper()
     {
-        DriveInfo[] allDrives = DriveInfo.GetDrives();
+        _readCounter = new("PhysicalDisk", "Disk Read Bytes/sec", "_Total");
+        _writeCounter = new("PhysicalDisk", "Disk Write Bytes/sec", "_Total");
+        _iopsCounter = new("PhysicalDisk", "Disk Transfers/sec", "_Total");
+        _latencyCounter = new("PhysicalDisk", "Avg. Disk sec/Transfer", "_Total");
 
-        foreach (DriveInfo d in allDrives)
-        {
-            Console.WriteLine("Drive {0}", d.Name);
-            Console.WriteLine("Drive type: {0}", d.DriveType);
-            if (d.IsReady)
-            {
-                Console.WriteLine("File system: {0}", d.DriveFormat);
-                Console.WriteLine("Total available space: {0} GB", d.TotalFreeSpace / 1024.0 / 1024.0 / 1024.0);
-                Console.WriteLine("Total size of drive: {0} GB", d.TotalSize / 1024.0 / 1024.0 / 1024.0);
-            }
-        }
-
+        // Warm up to get initial values
+        _readCounter.NextValue();
+        _writeCounter.NextValue();
+        _iopsCounter.NextValue();
+        _latencyCounter.NextValue();
     }
 
-    public void GetDiskSpec()
+    public DiskMetrics GetDiskMetrics()
     {
-        PerformanceCounter readCounter = new("PhysicalDisk", "Disk Read Bytes/sec", "_Total");
-        PerformanceCounter writeCounter = new("PhysicalDisk", "Disk Write Bytes/sec", "_Total");
-        PerformanceCounter iopsCounter = new("PhysicalDisk", "Disk Transfers/sec", "_Total");
-        PerformanceCounter latencyCounter = new("PhysicalDisk", "Avg. Disk sec/Transfer", "_Total");
+        double readBytesPerSec = _readCounter.NextValue();
+        double writeBytesPerSec = _writeCounter.NextValue();
+        double currentIops = _iopsCounter.NextValue();
+        double currentLatencyMs = _latencyCounter.NextValue() * 1000;
 
-        readCounter.NextValue();
-        writeCounter.NextValue();
-        iopsCounter.NextValue();
-        latencyCounter.NextValue();
+        double readMbPerSec = Math.Round(readBytesPerSec / (1024 * 1024), 2);
+        double writeMbPerSec = Math.Round(writeBytesPerSec / (1024 * 1024), 2);
 
-        while (true)
+        return new DiskMetrics(readMbPerSec, writeMbPerSec, currentIops, currentLatencyMs);
+    }
+
+    public List<DriveMetrics> GetAllDrivesUsage()
+    {
+        DriveInfo[] drives = DriveInfo.GetDrives();
+        var result = new List<DriveMetrics>();
+
+        foreach (DriveInfo drive in drives)
         {
-            float readBytesPerSec = readCounter.NextValue();
-            float writeBytesPerSec = writeCounter.NextValue();
-            float currentIops = iopsCounter.NextValue();
-            float currentLatencyMs = latencyCounter.NextValue() * 1000;
+            if (!drive.IsReady)
+                continue;
 
-            float readMbPerSec = readBytesPerSec / (1024 * 1024);
-            float writeMbPerSec = writeBytesPerSec / (1024 * 1024);
-            Thread.Sleep(1000);
+            double totalGB = drive.TotalSize / (1024.0 * 1024.0 * 1024.0);
+            double freeGB = drive.TotalFreeSpace / (1024.0 * 1024.0 * 1024.0);
+            double usedGB = totalGB - freeGB;
+            double usedPct = totalGB > 0 ? (usedGB / totalGB) * 100 : 0;
+
+            result.Add(new DriveMetrics(drive.Name, drive.DriveFormat, usedGB, totalGB, usedPct));
         }
+
+        return result;
     }
 
     public void Dispose()
     {
         if (_disposed)
             return;
+
+        _readCounter?.Dispose();
+        _writeCounter?.Dispose();
+        _iopsCounter?.Dispose();
+        _latencyCounter?.Dispose();
+
         _disposed = true;
     }
 }

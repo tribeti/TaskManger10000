@@ -14,9 +14,12 @@ class Program
     static (long ping, int loss) _currentNetwork1;
 
     static (double totalGB, double freeGB, double usedPct) _currentRam;
+    static List<DriveMetrics> _currentDrivesMetrics = [];
+    static DiskMetrics _currentDiskMetrics = new(0, 0, 0, 0);
     static readonly object _ramLock = new();
     static readonly object _networkLock = new();
     static readonly object _networkLock1 = new();
+    static readonly object _diskLock = new();
 
     static volatile bool _statDirty = true;
     static volatile bool _procDirty = true;
@@ -28,6 +31,7 @@ class Program
         using var cpu = new CpuHelper();
         using var gpu = new GpuHelper();
         using var network = new NetworkHelper();
+        using var disk = new DiskHelper();
         var procMonitor = new ProcessMonitor();
 
         string cpuName = CpuHelper.GetProcessorCoreName();
@@ -93,6 +97,14 @@ class Program
                 var net1 = network.GetPingAndPacketLoss();
                 lock (_networkLock1)
                 { _currentNetwork1 = net1; }
+
+                var drivesMetrics = disk.GetAllDrivesUsage();
+                var diskMetrics = disk.GetDiskMetrics();
+                lock (_diskLock)
+                {
+                    _currentDrivesMetrics = drivesMetrics;
+                    _currentDiskMetrics = diskMetrics;
+                }
 
                 _statDirty = true;
                 await Task.Delay(1000);
@@ -213,6 +225,14 @@ class Program
                         lock (_networkLock1)
                         { net1 = _currentNetwork1; }
 
+                        List<DriveMetrics> drivesMetrics;
+                        DiskMetrics diskMetrics;
+                        lock (_diskLock)
+                        {
+                            drivesMetrics = _currentDrivesMetrics;
+                            diskMetrics = _currentDiskMetrics;
+                        }
+
                         layout["CPU"].Update(CpuPanel.Build(_currentCpu, cpuName, osName));
                         layout["RAM"].Update(RamPanel.Build(
                             ram.usedPct,
@@ -220,6 +240,7 @@ class Program
                             ram.totalGB));
                         layout["GPU"].Update(GpuPanel.Build(_currentGpuUsage, gpuName, gpuDriver));
                         layout["Network"].Update(NetworkPanel.Build(net.receive, net.send, net1.ping, net1.loss));
+                        layout["Disk"].Update(DiskPanel.Build(drivesMetrics, diskMetrics));
 
                         _statDirty = false;
                         refreshed = true;
