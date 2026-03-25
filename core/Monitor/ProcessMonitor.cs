@@ -19,8 +19,7 @@ public class ProcessMonitor
                     Id: p.Id,
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: 0,
-                    Status: p.Responding ? "Running" : "Not Responding"
+                    CpuUsage: 0
                 ));
             }
             catch { }

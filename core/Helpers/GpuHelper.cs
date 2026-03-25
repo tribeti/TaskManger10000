@@ -25,7 +25,7 @@ public class GpuHelper : IDisposable
             var counterNames = category.GetInstanceNames();
 
             var gpuCounters = counterNames
-                                .Where(counterName => counterName.EndsWith("engtype_3D"))
+                                .Where(counterName => counterName.Contains("luid_"))
                                 .SelectMany(counterName => category.GetCounters(counterName))
                                 .Where(counter => counter.CounterName.Equals("Utilization Percentage"))
                                 .ToList();
@@ -38,13 +38,35 @@ public class GpuHelper : IDisposable
         }
     }
 
-    public void WarmUp() => _counters.ForEach(c => c.NextValue());
+    public void WarmUp() => _counters.ForEach(c => { try { c.NextValue(); } catch { } });
 
     public double GetGPUUsage()
     {
         if (_counters.Count == 0)
             return 0;
-        return Math.Round(_counters.Sum(c => c.NextValue()), 1);
+
+        bool hasError = false;
+        double total = 0;
+
+        foreach (var c in _counters)
+        {
+            try
+            { total += c.NextValue(); }
+            catch (InvalidOperationException) { hasError = true; }
+        }
+
+        if (hasError)
+            ReinitCounters();
+
+        return Math.Round(total, 1);
+    }
+
+    private void ReinitCounters()
+    {
+        _counters.ForEach(c => c.Dispose());
+        _counters.Clear();
+        _counters.AddRange(InitCounters());
+        _counters.ForEach(c => { try { c.NextValue(); } catch { } });
     }
 
     // not tested on multi-GPU systems, but should return the first GPU's info (maybe igpu idk)

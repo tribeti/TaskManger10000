@@ -17,7 +17,7 @@ public static class RamPanel
             .AddItem("Free", 100 - usedPct, Color.Green)
         );
         // show used / total in GB
-        grid.AddRow("Used", $"[white]{usedGB:F2} / {totalGB:F2} GB[/]");
+        grid.AddRow("Used", $"[bold]{usedGB:F2} / {totalGB:F2} GB[/]");
 
         return new Panel(grid)
             .Header("[bold green]RAM[/]", Justify.Center)
