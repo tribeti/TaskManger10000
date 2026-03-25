@@ -35,8 +35,8 @@ public class DiskHelper : IDisposable
         double currentIops = _iopsCounter.NextValue();
         double currentLatencyMs = _latencyCounter.NextValue() * 1000;
 
-        double readMbPerSec = Math.Round(readBytesPerSec / (1024 * 1024), 2);
-        double writeMbPerSec = Math.Round(writeBytesPerSec / (1024 * 1024), 2);
+        double readMbPerSec = Math.Round(readBytesPerSec / (1000 * 1024), 2);
+        double writeMbPerSec = Math.Round(writeBytesPerSec / (1000 * 1024), 2);
 
         return new DiskMetrics(readMbPerSec, writeMbPerSec, currentIops, currentLatencyMs);
     }
@@ -51,8 +51,8 @@ public class DiskHelper : IDisposable
             if (!drive.IsReady)
                 continue;
 
-            double totalGB = drive.TotalSize / (1024.0 * 1024.0 * 1024.0);
-            double freeGB = drive.TotalFreeSpace / (1024.0 * 1024.0 * 1024.0);
+            double totalGB = drive.TotalSize / (1000.0 * 1024.0 * 1024.0);
+            double freeGB = drive.TotalFreeSpace / (1000.0 * 1024.0 * 1024.0);
             double usedGB = totalGB - freeGB;
             double usedPct = totalGB > 0 ? (usedGB / totalGB) * 100 : 0;
 

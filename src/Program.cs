@@ -10,8 +10,8 @@ class Program
 {
     static double _currentCpu = 0;
     static double _currentGpuUsage = 0;
-    static (double send, double recieve) _currentNetwork;
-    static (long ping, int loss) _currentNetwork1;
+    static (double downloadSpeed, double uploadSpeed) _currentNetwork;
+    static (long ping, int loss) _currentPingInfo;
 
     static (double totalGB, double freeGB, double usedPct) _currentRam;
     static List<DriveMetrics> _currentDrivesMetrics = [];
@@ -96,7 +96,7 @@ class Program
 
                 var net1 = network.GetPingAndPacketLoss();
                 lock (_networkLock1)
-                { _currentNetwork1 = net1; }
+                { _currentPingInfo = net1; }
 
                 var drivesMetrics = disk.GetAllDrivesUsage();
                 var diskMetrics = disk.GetDiskMetrics();
@@ -223,7 +223,7 @@ class Program
 
                         (long ping, int loss) net1;
                         lock (_networkLock1)
-                        { net1 = _currentNetwork1; }
+                        { net1 = _currentPingInfo; }
 
                         List<DriveMetrics> drivesMetrics;
                         DiskMetrics diskMetrics;

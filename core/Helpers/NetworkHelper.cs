@@ -46,8 +46,8 @@ public class NetworkHelper : IDisposable
         if (elapsedSeconds > 0)
         {
 
-            downloadKBps = Math.Round((currentBytesReceived - _lastBytesReceived) / 1024.0 / elapsedSeconds, 2);
-            uploadKBps = Math.Round((currentBytesSent - _lastBytesSent) / 1024.0 / elapsedSeconds, 2);
+            downloadKBps = Math.Round((currentBytesReceived - _lastBytesReceived) / 1000.0 / elapsedSeconds, 2);
+            uploadKBps = Math.Round((currentBytesSent - _lastBytesSent) / 1000.0 / elapsedSeconds, 2);
         }
 
         _lastBytesReceived = currentBytesReceived;
@@ -73,7 +73,7 @@ public class NetworkHelper : IDisposable
         }
 
         int lost = sent - received;
-        long rtt = p.Send("www.google.com").RoundtripTime;
+        long rtt = p.Send("8.8.8.8").RoundtripTime;
         return (rtt, lost * 100 / sent);
     }
 

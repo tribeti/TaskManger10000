@@ -4,14 +4,14 @@ namespace src.Views;
 
 public static class NetworkPanel
 {
-    public static Panel Build(double sendSpeed, double recieveSpeed, long ping, int loss)
+    public static Panel Build(double sendSpeed, double receiveSpeed, long ping, int loss)
     {
         var grid = new Grid().AddColumn().AddColumn();
 
         grid.AddRow(
             new BarChart()
-            .AddItem("Upload (Kbps)", sendSpeed, Color.Blue)
-            .AddItem("Download (Kbps)", recieveSpeed, Color.Green)
+            .AddItem("Upload (KBps)", sendSpeed, Color.Blue)
+            .AddItem("Download (KBps)", receiveSpeed, Color.Green)
         );
 
         grid.AddRow("Ping", $"[bold]{ping:F0} ms[/]");
