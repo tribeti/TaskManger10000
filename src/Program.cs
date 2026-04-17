@@ -130,11 +130,12 @@ class Program
             {
                 while (true)
                 {
+                    const int IntroHeight = 1;
+                    const int TableVerticalPadding = 4;
                     int termHeight = Console.WindowHeight;
-                    int introLines = 3;
-                    int remainingForRows = termHeight - introLines;
+                    int remainingForRows = termHeight - IntroHeight;
                     int processHeight = (int) (remainingForRows * 4.0 / 6.0);
-                    pageSize = Math.Max(3, processHeight - 4);
+                    pageSize = Math.Max(3, processHeight - TableVerticalPadding);
 
                     bool inputChanged = false;
 
