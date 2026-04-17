@@ -15,7 +15,7 @@ public class CpuHelper : IDisposable
 
     public void WarmUp() => _totalCounter.NextValue();
 
-    public double GetUsage() => Math.Round(_totalCounter.NextValue(), 1);
+    public double GetUsage() => Math.Round(_totalCounter.NextValue(), 0);
 
     public static string GetProcessorCoreName()
     {

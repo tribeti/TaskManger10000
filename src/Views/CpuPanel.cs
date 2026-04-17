@@ -25,9 +25,8 @@ public static class CpuPanel
         grid.AddRow("Uptime", $"[bold]{CpuHelper.GetUptime():dd\\.hh\\:mm\\:ss}[/]");
 
         return new Panel(grid)
-            .Header("[bold cyan]CPU[/]", Justify.Center)
+            .Header("[bold]CPU[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Cyan1);
+            .Expand();
     }
 }

@@ -52,13 +52,13 @@ class Program
         var layout = new Layout("Root")
             .SplitRows(
                 new Layout("Stat").Ratio(2),
-                new Layout("Process").Ratio(3),
-                new Layout("Intro").Ratio(1));
+                new Layout("Process").Ratio(4),
+                new Layout("Intro").Size(1));
 
         layout["Stat"].SplitColumns(
-            new Layout("CPU").Ratio(1),
+            new Layout("CPU").Ratio(2),
             new Layout("RAM").Ratio(1),
-            new Layout("GPU").Ratio(1));
+            new Layout("GPU").Ratio(2));
 
         layout["Process"].SplitColumns(
             new Layout("Table").Ratio(7),
@@ -72,7 +72,7 @@ class Program
             new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
                 .Border(BoxBorder.None).Collapse());
 
-        const int pageSize = 10;
+        int pageSize = 10;
         int selectedIndex = 0, scrollOffset = 0;
         var sortMode = SortMode.MemoryDesc;
         string searchQuery = "";
@@ -130,6 +130,13 @@ class Program
             {
                 while (true)
                 {
+                    const int IntroHeight = 1;
+                    const int TableVerticalPadding = 4;
+                    int termHeight = Console.WindowHeight;
+                    int remainingForRows = termHeight - IntroHeight;
+                    int processHeight = (int) (remainingForRows * 4.0 / 6.0);
+                    pageSize = Math.Max(3, processHeight - TableVerticalPadding);
+
                     bool inputChanged = false;
 
                     while (Console.KeyAvailable)

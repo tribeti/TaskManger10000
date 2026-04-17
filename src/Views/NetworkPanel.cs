@@ -18,9 +18,8 @@ public static class NetworkPanel
         grid.AddRow("Packet loss", $"[bold]{loss:F2} %[/]");
 
         return new Panel(grid)
-            .Header("[bold blue]Network[/]", Justify.Center)
+            .Header("[bold]Network[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Blue);
+            .Expand();
     }
 }

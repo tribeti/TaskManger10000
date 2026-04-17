@@ -20,9 +20,8 @@ public static class RamPanel
         grid.AddRow("Used", $"[bold]{usedGB:F2} / {totalGB:F2} GB[/]");
 
         return new Panel(grid)
-            .Header("[bold green]RAM[/]", Justify.Center)
+            .Header("[bold]RAM[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Green);
+            .Expand();
     }
 }

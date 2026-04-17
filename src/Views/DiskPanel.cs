@@ -41,9 +41,8 @@ public static class DiskPanel
         var combined = new Rows(table, new Markup(""), grid);
 
         return new Panel(combined)
-            .Header("[bold yellow]Disk[/]", Justify.Center)
+            .Header("[bold]Disk[/]", Justify.Center)
             .Border(BoxBorder.Rounded)
-            .Expand()
-            .BorderColor(Color.Yellow);
+            .Expand();
     }
 }
