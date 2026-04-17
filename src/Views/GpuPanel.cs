@@ -12,7 +12,7 @@ public static class GpuPanel
             new BreakdownChart()
             .ShowPercentage().Compact()
             .AddItem("Used", gpuUsage, Color.Red)
-            .AddItem("Free", Math.Round(100 - gpuUsage, 1), Color.Green)
+            .AddItem("Free", 100 - gpuUsage, Color.Green)
         );
         grid.AddRow("Name", gpuName);
         grid.AddRow("Driver Version", driverVer);
