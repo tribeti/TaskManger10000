@@ -58,7 +58,7 @@ public class GpuHelper : IDisposable
         if (hasError)
             ReinitCounters();
 
-        return Math.Round(total, 1);
+        return Math.Round(total, 0);
     }
 
     private void ReinitCounters()

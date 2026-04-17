@@ -18,7 +18,8 @@ public static class GpuPanel
         grid.AddRow("Driver Version", driverVer);
 
         return new Panel(grid)
-            .Header("[bold yellow]GPU[/]", Justify.Center)
-            .Border(BoxBorder.Rounded).Expand().BorderColor(Color.Yellow);
+            .Header("[bold]GPU[/]", Justify.Center)
+            .Border(BoxBorder.Rounded)
+            .Expand();
     }
 }
