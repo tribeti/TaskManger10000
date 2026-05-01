@@ -16,10 +16,10 @@ class Program
     static (double totalGB, double freeGB, double usedPct) _currentRam;
     static List<DriveMetrics> _currentDrivesMetrics = [];
     static DiskMetrics _currentDiskMetrics = new(0, 0, 0, 0);
-    static readonly object _ramLock = new();
-    static readonly object _networkLock = new();
-    static readonly object _networkLock1 = new();
-    static readonly object _diskLock = new();
+    static readonly Lock _ramLock = new();
+    static readonly Lock _networkLock = new();
+    static readonly Lock _networkLock1 = new();
+    static readonly Lock _diskLock = new();
 
     static volatile bool _statDirty = true;
     static volatile bool _procDirty = true;
@@ -47,7 +47,6 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
-        procTable.AddColumn(new TableColumn("[bold]Cpu Usage[/]").RightAligned());
 
         var layout = new Layout("Root")
             .SplitRows(
@@ -61,12 +60,12 @@ class Program
             new Layout("GPU").Ratio(2));
 
         layout["Process"].SplitColumns(
-            new Layout("Table").Ratio(7),
-            new Layout("Info").Ratio(3));
+            new Layout("Table").Ratio(6),
+            new Layout("Info").Ratio(4));
 
         layout["Info"].SplitRows(
             new Layout("Network").Ratio(1),
-            new Layout("Disk").Ratio(1));
+            new Layout("Disk").Ratio(2));
 
         layout["Intro"].Update(
             new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
@@ -277,8 +276,7 @@ class Program
                                 procTable.AddRow(
                                     $"[black on white]{p.Id}[/]",
                                     $"[black on white]{p.Name}[/]",
-                                    $"[black on white]{p.MemoryUsage:N2}[/]",
-                                    $"[black on white]{p.CpuUsage:N2}[/]"
+                                    $"[black on white]{p.MemoryUsage:N2}[/]"
                                 );
                             }
                             else
@@ -289,8 +287,7 @@ class Program
                                 procTable.AddRow(
                                     p.Id.ToString(),
                                     Markup.Escape(p.Name),
-                                    $"[{memColor}]{p.MemoryUsage:N2}[/]",
-                                    $"[bold]{p.CpuUsage:N2}[/]"
+                                    $"[{memColor}]{p.MemoryUsage:N2}[/]"
                                 );
                             }
                         }
