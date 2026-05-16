@@ -3,4 +3,5 @@
   <Project Path="src/src.csproj">
     <BuildType Project="Release" />
   </Project>
+  <Project Path="test/test.csproj" Id="49cc2eb2-dc4e-4316-babd-5abcf1738d7d" />
 </Solution>
