@@ -23,13 +23,18 @@ class Program
         public int SelectedIndex { get; set; }
         public int ScrollOffset { get; set; }
         public SortMode SortMode { get; set; } = SortMode.MemoryDesc;
-        public string SearchQuery { get; set; } = "";
+        public char[] SearchBuffer = new char[64];
+        public int SearchLength { get; set; } = 0;
         public bool SearchMode { get; set; }
+        public string GetSearchQuery() => SearchLength == 0 ? "" : new string(SearchBuffer, 0, SearchLength);
     }
 
     private static volatile SystemStats? _currentStats;
     private static volatile bool _statsDirty = true;
     private static volatile bool _procDirty = true;
+
+    private static int _cachedWindowHeight = -1;
+    private static int _cachedPageSize = 10;
 
     static void Main()
     {
@@ -56,6 +61,9 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
+
+        var procPanel = new Panel(procTable).Expand();
+        layout["Table"].Update(procPanel);
 
         // ── Background Tasks ─────────────────────────────────────
         StartStatsCollector(cpu, gpu, network, disk);
@@ -88,7 +96,7 @@ class Program
 
                     if (_procDirty || inputChanged)
                     {
-                        filtered = procMonitor.GetFiltered(viewState.SearchQuery, viewState.SortMode);
+                        filtered = procMonitor.GetFiltered(viewState.GetSearchQuery(), viewState.SortMode);
 
                         if (filtered.Count == 0)
                         {
@@ -145,12 +153,18 @@ class Program
 
     private static int CalculatePageSize()
     {
+        int currentHeight = Console.WindowHeight;
+        if (currentHeight == _cachedWindowHeight)
+            return _cachedPageSize;
+
+        _cachedWindowHeight = currentHeight;
         const int IntroHeight = 1;
         const int TableVerticalPadding = 4;
-        int termHeight = Console.WindowHeight;
-        int remainingForRows = termHeight - IntroHeight;
+        int remainingForRows = currentHeight - IntroHeight;
         int processHeight = (int) (remainingForRows * 4.0 / 6.0);
-        return Math.Max(3, processHeight - TableVerticalPadding);
+
+        _cachedPageSize = Math.Max(3, processHeight - TableVerticalPadding);
+        return _cachedPageSize;
     }
 
     private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, ProcessMonitor procMonitor, int pageSize)
@@ -166,25 +180,25 @@ class Program
                 switch (key)
                 {
                     case ConsoleKey.Escape:
-                    state.SearchMode = false;
-                    state.SearchQuery = "";
-                    changed = true;
-                    break;
-                    case ConsoleKey.Backspace when state.SearchQuery.Length > 0:
-                    state.SearchQuery = state.SearchQuery[..^1];
-                    changed = true;
-                    break;
-                    case ConsoleKey.Enter:
-                    state.SearchMode = false;
-                    changed = true;
-                    break;
-                    default:
-                    if (!char.IsControl(ki.KeyChar))
-                    {
-                        state.SearchQuery += ki.KeyChar;
+                        state.SearchMode = false;
+                        state.SearchLength = 0;
                         changed = true;
-                    }
-                    break;
+                        break;
+                    case ConsoleKey.Backspace when state.SearchLength > 0:
+                        state.SearchLength--;
+                        changed = true;
+                        break;
+                    case ConsoleKey.Enter:
+                        state.SearchMode = false;
+                        changed = true;
+                        break;
+                    default:
+                        if (!char.IsControl(ki.KeyChar) && state.SearchLength < state.SearchBuffer.Length)
+                        {
+                            state.SearchBuffer[state.SearchLength++] = ki.KeyChar;
+                            changed = true;
+                        }
+                        break;
                 }
             }
             else
@@ -192,54 +206,54 @@ class Program
                 switch (key)
                 {
                     case ConsoleKey.UpArrow:
-                    state.SelectedIndex = Math.Max(0, state.SelectedIndex - 1);
-                    if (state.SelectedIndex < state.ScrollOffset)
-                        state.ScrollOffset = state.SelectedIndex;
-                    changed = true;
-                    break;
+                        state.SelectedIndex = Math.Max(0, state.SelectedIndex - 1);
+                        if (state.SelectedIndex < state.ScrollOffset)
+                            state.ScrollOffset = state.SelectedIndex;
+                        changed = true;
+                        break;
 
                     case ConsoleKey.DownArrow:
-                    int maxIdx = Math.Max(0, processes.Count - 1);
-                    state.SelectedIndex = Math.Min(maxIdx, state.SelectedIndex + 1);
-                    if (state.SelectedIndex >= state.ScrollOffset + pageSize)
-                        state.ScrollOffset = state.SelectedIndex - pageSize + 1;
-                    changed = true;
-                    break;
+                        int maxIdx = Math.Max(0, processes.Count - 1);
+                        state.SelectedIndex = Math.Min(maxIdx, state.SelectedIndex + 1);
+                        if (state.SelectedIndex >= state.ScrollOffset + pageSize)
+                            state.ScrollOffset = state.SelectedIndex - pageSize + 1;
+                        changed = true;
+                        break;
 
                     case ConsoleKey.K when processes.Count > 0:
-                    var target = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
-                    if (ki.Modifiers.HasFlag(ConsoleModifiers.Shift))
-                        procMonitor.KillAllByName(target.Name);
-                    else
-                        procMonitor.Kill(target.Id);
-                    changed = true;
-                    break;
+                        var target = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
+                        if (ki.Modifiers.HasFlag(ConsoleModifiers.Shift))
+                            procMonitor.KillAllByName(target.Name);
+                        else
+                            procMonitor.Kill(target.Id);
+                        changed = true;
+                        break;
 
                     case ConsoleKey.S:
-                    state.SortMode = state.SortMode switch
-                    {
-                        SortMode.MemoryDesc => SortMode.NameAsc,
-                        _ => SortMode.MemoryDesc
-                    };
-                    changed = true;
-                    break;
+                        state.SortMode = state.SortMode switch
+                        {
+                            SortMode.MemoryDesc => SortMode.NameAsc,
+                            _ => SortMode.MemoryDesc
+                        };
+                        changed = true;
+                        break;
 
                     case ConsoleKey.F:
-                    state.SearchMode = true;
-                    state.SearchQuery = "";
-                    changed = true;
-                    break;
+                        state.SearchMode = true;
+                        state.SearchLength = 0;
+                        changed = true;
+                        break;
 
                     case ConsoleKey.Escape:
-                    if (!string.IsNullOrEmpty(state.SearchQuery))
-                    {
-                        state.SearchQuery = "";
-                        changed = true;
-                    }
-                    break;
+                        if (state.SearchLength > 0)
+                        {
+                            state.SearchLength = 0;
+                            changed = true;
+                        }
+                        break;
 
                     case ConsoleKey.Q:
-                    return (false, true);
+                        return (false, true);
                 }
             }
         }
@@ -260,22 +274,24 @@ class Program
     {
         procTable.Rows.Clear();
 
-        if (state.SearchMode || !string.IsNullOrEmpty(state.SearchQuery))
+        if (state.SearchMode || state.SearchLength > 0)
         {
             procTable.Caption = new TableTitle(
-                $"[yellow]Search: {Markup.Escape(state.SearchQuery)}{(state.SearchMode ? "_" : "")}[/] ([dim]{processes.Count} results[/])");
+                $"[yellow]Search: {Markup.Escape(state.GetSearchQuery())}{(state.SearchMode ? "_" : "")}[/] ([dim]{processes.Count} results[/])");
+
         }
         else
         {
             procTable.Caption = null;
         }
 
-        var visible = processes.Skip(state.ScrollOffset).Take(pageSize).ToList();
-        for (int i = 0; i < visible.Count; i++)
-        {
-            var p = visible[i];
-            bool isSelected = (state.ScrollOffset + i) == state.SelectedIndex;
+        int start = state.ScrollOffset;
+        int end = Math.Min(start + pageSize, processes.Count);
 
+        for (int i = start; i < end; i++)
+        {
+            var p = processes[i];
+            bool isSelected = i == state.SelectedIndex;
             string safeName = Markup.Escape(p.Name);
 
             if (isSelected)
@@ -296,8 +312,6 @@ class Program
                 );
             }
         }
-
-        layout["Table"].Update(new Panel(procTable).Expand());
     }
 
     private static void StartStatsCollector(CpuHelper cpu, GpuHelper gpu, NetworkHelper network, DiskHelper disk)

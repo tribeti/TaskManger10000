@@ -9,7 +9,6 @@
 
 		<!--trimming and optimizing config-->
 		<PublishAot>true</PublishAot>
-		<PublishReadyToRun>true</PublishReadyToRun>
 		<PublishTrimmed>true</PublishTrimmed>
 		<InvariantGlobalization>true</InvariantGlobalization>
 
