@@ -98,6 +98,7 @@ class Program
                         else
                         {
                             viewState.SelectedIndex = Math.Clamp(viewState.SelectedIndex, 0, filtered.Count - 1);
+                            viewState.ScrollOffset = Math.Clamp(viewState.ScrollOffset, 0, Math.Max(0, filtered.Count - pageSize));
                         }
 
                         RenderProcesses(layout, procTable, filtered, viewState, pageSize);
@@ -217,8 +218,7 @@ class Program
                     case ConsoleKey.S:
                     state.SortMode = state.SortMode switch
                     {
-                        SortMode.MemoryDesc => SortMode.CpuDesc,
-                        SortMode.CpuDesc => SortMode.NameAsc,
+                        SortMode.MemoryDesc => SortMode.NameAsc,
                         _ => SortMode.MemoryDesc
                     };
                     changed = true;
