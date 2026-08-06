@@ -325,7 +325,7 @@ class Program
                     gpu.GetGPUUsage(),
                     RamHelper.GetMemoryStatus(),
                     network.NetworkSpeed(),
-                    network.GetPingAndPacketLoss(),
+                    NetworkHelper.GetPingAndPacketLoss(),
                     disk.GetAllDrivesUsage(),
                     disk.GetDiskMetrics()
                 );
