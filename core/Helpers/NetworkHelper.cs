@@ -7,37 +7,32 @@ public class NetworkHelper : IDisposable
     private long _lastBytesReceived;
     private long _lastBytesSent;
     private DateTime _lastMeasuredAt;
+    private NetworkInterface[] networkInterfaces;
 
     public NetworkHelper()
     {
-        var interfaces = GetActiveInterfaces();
-        _lastBytesReceived = GetTotalBytesReceived(interfaces);
-        _lastBytesSent = GetTotalBytesSent(interfaces);
+        networkInterfaces = GetActiveInterfaces();
+        _lastBytesReceived = GetTotalBytesReceived(networkInterfaces);
+        _lastBytesSent = GetTotalBytesSent(networkInterfaces);
         _lastMeasuredAt = DateTime.UtcNow;
+
+        NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
     }
 
-    private static NetworkInterface[] GetActiveInterfaces()
-    {
-        return NetworkInterface.GetAllNetworkInterfaces()
-            .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
-            .ToArray();
-    }
+    private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e) => networkInterfaces = GetActiveInterfaces();
 
-    private static long GetTotalBytesReceived(NetworkInterface[] interfaces)
-    {
-        return interfaces.Sum(nic => nic.GetIPStatistics().BytesReceived);
-    }
+    private static NetworkInterface[] GetActiveInterfaces() => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
+        .ToArray();
 
-    private static long GetTotalBytesSent(NetworkInterface[] interfaces)
-    {
-        return interfaces.Sum(nic => nic.GetIPStatistics().BytesSent);
-    }
+    private static long GetTotalBytesReceived(NetworkInterface[] interfaces) => interfaces.Sum(nic => nic.GetIPStatistics().BytesReceived);
+
+    private static long GetTotalBytesSent(NetworkInterface[] interfaces) => interfaces.Sum(nic => nic.GetIPStatistics().BytesSent);
 
     public (double downloadKBps, double uploadKBps) NetworkSpeed()
     {
-        var interfaces = GetActiveInterfaces();
-        long currentBytesReceived = GetTotalBytesReceived(interfaces);
-        long currentBytesSent = GetTotalBytesSent(interfaces);
+        long currentBytesReceived = GetTotalBytesReceived(networkInterfaces);
+        long currentBytesSent = GetTotalBytesSent(networkInterfaces);
         DateTime now = DateTime.UtcNow;
 
         double elapsedSeconds = (now - _lastMeasuredAt).TotalSeconds;
@@ -58,7 +53,7 @@ public class NetworkHelper : IDisposable
         return (downloadKBps, uploadKBps);
     }
 
-    public (long roundtripMs, int packetLossPct) GetPingAndPacketLoss()
+    public static (long roundtripMs, int packetLossPct) GetPingAndPacketLoss()
     {
         using Ping p = new();
         var options = new PingOptions { DontFragment = true };

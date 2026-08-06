@@ -18,7 +18,7 @@ public class NetworkHelperTests
     public void GetPingAndPacketLoss_ShouldReturnValidPing()
     {
         using var helper = new NetworkHelper();
-        var (roundtripMs, packetLossPct) = helper.GetPingAndPacketLoss();
+        var (roundtripMs, packetLossPct) = NetworkHelper.GetPingAndPacketLoss();
         Assert.InRange(packetLossPct, 0, 100);
         Assert.True(roundtripMs >= 0);
     }

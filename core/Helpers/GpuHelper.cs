@@ -25,7 +25,7 @@ public class GpuHelper : IDisposable
             var counterNames = category.GetInstanceNames();
 
             var gpuCounters = counterNames
-                                .Where(counterName => counterName.Contains("luid_"))
+                                .Where(counterName => counterName.Contains("luid_") && counterName.Contains("engtype_3D"))
                                 .SelectMany(counterName => category.GetCounters(counterName))
                                 .Where(counter => counter.CounterName.Equals("Utilization Percentage"))
                                 .ToList();
@@ -90,7 +90,6 @@ public class GpuHelper : IDisposable
 
             var name = subKey.GetValue("DriverDesc")?.ToString();
             var driver = subKey.GetValue("DriverVersion")?.ToString();
-            driver = driver?.Replace(".", "")[^5..].Insert(3, ".");
 
             if (!string.IsNullOrEmpty(name))
             {
