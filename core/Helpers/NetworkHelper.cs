@@ -4,6 +4,7 @@ namespace core.Helpers;
 
 public class NetworkHelper : IDisposable
 {
+    private readonly Lock _lock = new();
     private long _lastBytesReceived;
     private long _lastBytesSent;
     private DateTime _lastMeasuredAt;
@@ -19,7 +20,25 @@ public class NetworkHelper : IDisposable
         NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
     }
 
-    private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e) => networkInterfaces = GetActiveInterfaces();
+    private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e)
+    {
+        lock (_lock)
+        {
+            UpdateInterfaces();
+        }
+    }
+
+    private void UpdateInterfaces()
+    {
+        var currentInterfaces = GetActiveInterfaces();
+        if (!currentInterfaces.Select(nic => nic.Id).SequenceEqual(networkInterfaces.Select(nic => nic.Id)))
+        {
+            networkInterfaces = currentInterfaces;
+            _lastBytesReceived = GetTotalBytesReceived(networkInterfaces);
+            _lastBytesSent = GetTotalBytesSent(networkInterfaces);
+            _lastMeasuredAt = DateTime.UtcNow;
+        }
+    }
 
     private static NetworkInterface[] GetActiveInterfaces() => NetworkInterface.GetAllNetworkInterfaces()
         .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
@@ -31,26 +50,30 @@ public class NetworkHelper : IDisposable
 
     public (double downloadKBps, double uploadKBps) NetworkSpeed()
     {
-        long currentBytesReceived = GetTotalBytesReceived(networkInterfaces);
-        long currentBytesSent = GetTotalBytesSent(networkInterfaces);
-        DateTime now = DateTime.UtcNow;
-
-        double elapsedSeconds = (now - _lastMeasuredAt).TotalSeconds;
-
-        double downloadKBps = 0;
-        double uploadKBps = 0;
-
-        if (elapsedSeconds > 0)
+        lock (_lock)
         {
-            downloadKBps = Math.Round((currentBytesReceived - _lastBytesReceived) / 1024.0 / elapsedSeconds, 2);
-            uploadKBps = Math.Round((currentBytesSent - _lastBytesSent) / 1024.0 / elapsedSeconds, 2);
+            UpdateInterfaces();
+            long currentBytesReceived = GetTotalBytesReceived(networkInterfaces);
+            long currentBytesSent = GetTotalBytesSent(networkInterfaces);
+            DateTime now = DateTime.UtcNow;
+
+            double elapsedSeconds = (now - _lastMeasuredAt).TotalSeconds;
+
+            double downloadKBps = 0;
+            double uploadKBps = 0;
+
+            if (elapsedSeconds > 0)
+            {
+                downloadKBps = Math.Round((currentBytesReceived - _lastBytesReceived) / 1024.0 / elapsedSeconds, 2);
+                uploadKBps = Math.Round((currentBytesSent - _lastBytesSent) / 1024.0 / elapsedSeconds, 2);
+            }
+
+            _lastBytesReceived = currentBytesReceived;
+            _lastBytesSent = currentBytesSent;
+            _lastMeasuredAt = now;
+
+            return (downloadKBps, uploadKBps);
         }
-
-        _lastBytesReceived = currentBytesReceived;
-        _lastBytesSent = currentBytesSent;
-        _lastMeasuredAt = now;
-
-        return (downloadKBps, uploadKBps);
     }
 
     public static (long roundtripMs, int packetLossPct) GetPingAndPacketLoss()
@@ -79,5 +102,8 @@ public class NetworkHelper : IDisposable
         return (avgRtt, packetLossPct);
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
+    }
 }
