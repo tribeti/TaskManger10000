@@ -61,6 +61,7 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
+        procTable.AddColumn(new TableColumn("[bold]CPU Usage[/]").Alignment(Justify.Center));
 
         var procPanel = new Panel(procTable).Expand();
         layout["Table"].Update(procPanel);
@@ -232,7 +233,8 @@ class Program
                     case ConsoleKey.S:
                         state.SortMode = state.SortMode switch
                         {
-                            SortMode.MemoryDesc => SortMode.NameAsc,
+                            SortMode.MemoryDesc => SortMode.CpuDesc,
+                            SortMode.CpuDesc => SortMode.NameAsc,
                             _ => SortMode.MemoryDesc
                         };
                         changed = true;
@@ -299,16 +301,20 @@ class Program
                 procTable.AddRow(
                     $"[black on white]{p.Id}[/]",
                     $"[black on white]{safeName}[/]",
-                    $"[black on white]{p.MemoryUsage:N2}[/]"
+                    $"[black on white]{p.MemoryUsage:F2}[/]",
+                    $"[black on white]{p.CpuUsage:F1}%[/]"
                 );
             }
             else
             {
                 string memColor = p.MemoryUsage > 500 ? "red" : p.MemoryUsage > 300 ? "yellow" : "green";
+                string cpuColor = p.CpuUsage > 25 ? "red" : p.CpuUsage > 10 ? "yellow" : "green";
+
                 procTable.AddRow(
                     p.Id.ToString(),
                     safeName,
-                    $"[{memColor}]{p.MemoryUsage:N2}[/]"
+                    $"[{memColor}]{p.MemoryUsage:F2}[/]",
+                    $"[{cpuColor}]{p.CpuUsage:F1}%[/]"
                 );
             }
         }

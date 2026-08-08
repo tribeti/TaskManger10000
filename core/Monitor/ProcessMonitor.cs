@@ -6,26 +6,43 @@ namespace core.Monitor;
 public class ProcessMonitor
 {
     private volatile List<ProcessInfo> _cache = [];
+    private Dictionary<int, (TimeSpan cpu, DateTime time)> _prev = [];
+
     public void Refresh()
     {
+        var now = DateTime.UtcNow;
         var procs = Process.GetProcesses();
         var list = new List<ProcessInfo>(procs.Length);
+        var current = new Dictionary<int, (TimeSpan, DateTime)>();
 
         foreach (var p in procs)
         {
             try
             {
+                var cpuTime = p.TotalProcessorTime;
+                double cpuPercent = 0;
+
+                if (_prev.TryGetValue(p.Id, out var old))
+                {
+                    double usedMs = (cpuTime - old.cpu).TotalMilliseconds;
+                    double elapsedMs = (now - old.time).TotalMilliseconds;
+                    cpuPercent = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                }
+
+                current[p.Id] = (cpuTime, now);
+
                 list.Add(new ProcessInfo(
                     Id: p.Id,
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: 0
+                    CpuUsage: cpuPercent
                 ));
             }
             catch { }
             finally { p.Dispose(); }
         }
 
+        _prev = current;
         _cache = list;
     }
 
