@@ -81,7 +81,7 @@ class Program
                 while (true)
                 {
                     int pageSize = CalculatePageSize();
-                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, procMonitor, pageSize);
+                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, pageSize);
 
                     if (shouldExit)
                         break;
@@ -110,7 +110,7 @@ class Program
                             viewState.ScrollOffset = Math.Clamp(viewState.ScrollOffset, 0, Math.Max(0, filtered.Count - pageSize));
                         }
 
-                        RenderProcesses(layout, procTable, filtered, viewState, pageSize);
+                        RenderProcesses(procTable, filtered, viewState, pageSize);
                         _procDirty = false;
                         refreshed = true;
                     }
@@ -168,7 +168,7 @@ class Program
         return _cachedPageSize;
     }
 
-    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, ProcessMonitor procMonitor, int pageSize)
+    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, int pageSize)
     {
         bool changed = false;
         while (Console.KeyAvailable)
@@ -224,9 +224,9 @@ class Program
                     case ConsoleKey.K when processes.Count > 0:
                         var target = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
                         if (ki.Modifiers.HasFlag(ConsoleModifiers.Shift))
-                            procMonitor.KillAllByName(target.Name);
+                            ProcessMonitor.KillAllByName(target.Name);
                         else
-                            procMonitor.Kill(target.Id);
+                            ProcessMonitor.Kill(target.Id);
                         changed = true;
                         break;
 
@@ -272,7 +272,7 @@ class Program
         layout["Disk"].Update(DiskPanel.Build(stats.Drives, stats.Disk));
     }
 
-    private static void RenderProcesses(Layout layout, Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
+    private static void RenderProcesses(Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
     {
         procTable.Rows.Clear();
 

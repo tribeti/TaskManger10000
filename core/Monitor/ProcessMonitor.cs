@@ -6,30 +6,45 @@ namespace core.Monitor;
 public class ProcessMonitor
 {
     private volatile List<ProcessInfo> _cache = [];
-    private Dictionary<int, (TimeSpan cpu, DateTime time)> _prev = [];
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private Dictionary<int, (TimeSpan Cpu, TimeSpan Timestamp, DateTime StartTime)> _prev = [];
 
     public void Refresh()
     {
-        var now = DateTime.UtcNow;
+        var now = _clock.Elapsed;
         var procs = Process.GetProcesses();
         var list = new List<ProcessInfo>(procs.Length);
-        var current = new Dictionary<int, (TimeSpan, DateTime)>();
+        var current = new Dictionary<int, (TimeSpan, TimeSpan, DateTime)>();
 
         foreach (var p in procs)
         {
             try
             {
                 var cpuTime = p.TotalProcessorTime;
+
+                DateTime startTime;
+                try
+                { startTime = p.StartTime; }
+                catch { startTime = DateTime.MinValue; }
+
                 double cpuPercent = 0;
 
-                if (_prev.TryGetValue(p.Id, out var old))
+                if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == startTime)
                 {
-                    double usedMs = (cpuTime - old.cpu).TotalMilliseconds;
-                    double elapsedMs = (now - old.time).TotalMilliseconds;
-                    cpuPercent = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                    double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
+                    double usedMs = (cpuTime - old.Cpu).TotalMilliseconds;
+
+                    if (elapsedMs > 0 && usedMs >= 0)
+                    {
+                        var raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                        if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
+                        {
+                            cpuPercent = raw;
+                        }
+                    }
                 }
 
-                current[p.Id] = (cpuTime, now);
+                current[p.Id] = (cpuTime, now, startTime);
 
                 list.Add(new ProcessInfo(
                     Id: p.Id,
@@ -63,7 +78,7 @@ public class ProcessMonitor
         };
     }
 
-    public void Kill(int pid)
+    public static void Kill(int pid)
     {
         try
         {
@@ -73,7 +88,7 @@ public class ProcessMonitor
         catch { }
     }
 
-    public void KillAllByName(string name)
+    public static void KillAllByName(string name)
     {
         foreach (var p in Process.GetProcessesByName(name))
         {
@@ -83,6 +98,4 @@ public class ProcessMonitor
             finally { p.Dispose(); }
         }
     }
-
-    public int CountByName(string name) => Process.GetProcessesByName(name).Length;
 }
