@@ -61,6 +61,7 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
+        procTable.AddColumn(new TableColumn("[bold]CPU Usage[/]").Alignment(Justify.Center));
 
         var procPanel = new Panel(procTable).Expand();
         layout["Table"].Update(procPanel);
@@ -80,7 +81,7 @@ class Program
                 while (true)
                 {
                     int pageSize = CalculatePageSize();
-                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, procMonitor, pageSize);
+                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, pageSize);
 
                     if (shouldExit)
                         break;
@@ -109,7 +110,7 @@ class Program
                             viewState.ScrollOffset = Math.Clamp(viewState.ScrollOffset, 0, Math.Max(0, filtered.Count - pageSize));
                         }
 
-                        RenderProcesses(layout, procTable, filtered, viewState, pageSize);
+                        RenderProcesses(procTable, filtered, viewState, pageSize);
                         _procDirty = false;
                         refreshed = true;
                     }
@@ -167,7 +168,7 @@ class Program
         return _cachedPageSize;
     }
 
-    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, ProcessMonitor procMonitor, int pageSize)
+    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, int pageSize)
     {
         bool changed = false;
         while (Console.KeyAvailable)
@@ -223,16 +224,17 @@ class Program
                     case ConsoleKey.K when processes.Count > 0:
                         var target = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
                         if (ki.Modifiers.HasFlag(ConsoleModifiers.Shift))
-                            procMonitor.KillAllByName(target.Name);
+                            ProcessMonitor.KillAllByName(target.Name);
                         else
-                            procMonitor.Kill(target.Id);
+                            ProcessMonitor.Kill(target.Id);
                         changed = true;
                         break;
 
                     case ConsoleKey.S:
                         state.SortMode = state.SortMode switch
                         {
-                            SortMode.MemoryDesc => SortMode.NameAsc,
+                            SortMode.MemoryDesc => SortMode.CpuDesc,
+                            SortMode.CpuDesc => SortMode.NameAsc,
                             _ => SortMode.MemoryDesc
                         };
                         changed = true;
@@ -270,7 +272,7 @@ class Program
         layout["Disk"].Update(DiskPanel.Build(stats.Drives, stats.Disk));
     }
 
-    private static void RenderProcesses(Layout layout, Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
+    private static void RenderProcesses(Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
     {
         procTable.Rows.Clear();
 
@@ -299,16 +301,20 @@ class Program
                 procTable.AddRow(
                     $"[black on white]{p.Id}[/]",
                     $"[black on white]{safeName}[/]",
-                    $"[black on white]{p.MemoryUsage:N2}[/]"
+                    $"[black on white]{p.MemoryUsage:F2}[/]",
+                    $"[black on white]{p.CpuUsage:F1}%[/]"
                 );
             }
             else
             {
                 string memColor = p.MemoryUsage > 500 ? "red" : p.MemoryUsage > 300 ? "yellow" : "green";
+                string cpuColor = p.CpuUsage > 25 ? "red" : p.CpuUsage > 10 ? "yellow" : "green";
+
                 procTable.AddRow(
                     p.Id.ToString(),
                     safeName,
-                    $"[{memColor}]{p.MemoryUsage:N2}[/]"
+                    $"[{memColor}]{p.MemoryUsage:F2}[/]",
+                    $"[{cpuColor}]{p.CpuUsage:F1}%[/]"
                 );
             }
         }

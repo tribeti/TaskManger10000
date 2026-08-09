@@ -6,26 +6,61 @@ namespace core.Monitor;
 public class ProcessMonitor
 {
     private volatile List<ProcessInfo> _cache = [];
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private Dictionary<int, (TimeSpan Cpu, TimeSpan Timestamp, DateTime StartTime)> _prev = [];
+
     public void Refresh()
     {
+        var now = _clock.Elapsed;
         var procs = Process.GetProcesses();
         var list = new List<ProcessInfo>(procs.Length);
+        var current = new Dictionary<int, (TimeSpan, TimeSpan, DateTime)>();
 
         foreach (var p in procs)
         {
             try
             {
+                var cpuTime = p.TotalProcessorTime;
+
+                DateTime? startTime;
+                try
+                { startTime = p.StartTime; }
+                catch { startTime = null; }
+
+                double cpuPercent = 0;
+
+                if (startTime is DateTime validStart)
+                {
+                    if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == validStart)
+                    {
+                        double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
+                        double usedMs = (cpuTime - old.Cpu).TotalMilliseconds;
+
+                        if (elapsedMs > 0 && usedMs >= 0)
+                        {
+                            var raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                            if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
+                            {
+                                cpuPercent = raw;
+                            }
+                        }
+                    }
+
+                    current[p.Id] = (cpuTime, now, validStart);
+                }
+
                 list.Add(new ProcessInfo(
                     Id: p.Id,
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: 0
+                    CpuUsage: cpuPercent
                 ));
             }
             catch { }
             finally { p.Dispose(); }
         }
 
+        _prev = current;
         _cache = list;
     }
 
@@ -46,7 +81,7 @@ public class ProcessMonitor
         };
     }
 
-    public void Kill(int pid)
+    public static void Kill(int pid)
     {
         try
         {
@@ -56,7 +91,7 @@ public class ProcessMonitor
         catch { }
     }
 
-    public void KillAllByName(string name)
+    public static void KillAllByName(string name)
     {
         foreach (var p in Process.GetProcessesByName(name))
         {
@@ -66,6 +101,4 @@ public class ProcessMonitor
             finally { p.Dispose(); }
         }
     }
-
-    public int CountByName(string name) => Process.GetProcessesByName(name).Length;
 }
