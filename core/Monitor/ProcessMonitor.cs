@@ -22,29 +22,32 @@ public class ProcessMonitor
             {
                 var cpuTime = p.TotalProcessorTime;
 
-                DateTime startTime;
+                DateTime? startTime;
                 try
                 { startTime = p.StartTime; }
-                catch { startTime = DateTime.MinValue; }
+                catch { startTime = null; }
 
                 double cpuPercent = 0;
 
-                if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == startTime)
+                if (startTime is DateTime validStart)
                 {
-                    double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
-                    double usedMs = (cpuTime - old.Cpu).TotalMilliseconds;
-
-                    if (elapsedMs > 0 && usedMs >= 0)
+                    if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == validStart)
                     {
-                        var raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
-                        if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
+                        double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
+                        double usedMs = (cpuTime - old.Cpu).TotalMilliseconds;
+
+                        if (elapsedMs > 0 && usedMs >= 0)
                         {
-                            cpuPercent = raw;
+                            var raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                            if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
+                            {
+                                cpuPercent = raw;
+                            }
                         }
                     }
-                }
 
-                current[p.Id] = (cpuTime, now, startTime);
+                    current[p.Id] = (cpuTime, now, validStart);
+                }
 
                 list.Add(new ProcessInfo(
                     Id: p.Id,
