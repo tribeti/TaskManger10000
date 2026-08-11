@@ -136,6 +136,8 @@ public class GpuHelper : IDisposable
         if (baseKey is null)
             return (gpuName, driverVer, totalVramMB);
 
+        bool foundFirst = false;
+
         foreach (var subKeyName in baseKey.GetSubKeyNames())
         {
             if (!int.TryParse(subKeyName, out _))
@@ -150,17 +152,21 @@ public class GpuHelper : IDisposable
 
             if (!string.IsNullOrEmpty(name))
             {
-                gpuName = name;
-                driverVer = driver ?? "Unknown Driver Version";
-                totalVramMB = subKey.GetValue("HardwareInformation.qwMemorySize") switch
+                if (!foundFirst)
+                {
+                    gpuName = name;
+                    driverVer = driver ?? "Unknown Driver Version";
+                    foundFirst = true;
+                }
+
+                var vram = subKey.GetValue("HardwareInformation.qwMemorySize") switch
                 {
                     byte[] { Length: >= 8 } raw => BitConverter.ToUInt64(raw, 0) / 1024.0 / 1024.0,
                     long qword => qword / 1024.0 / 1024.0,
                     int dword => dword / 1024.0 / 1024.0,
                     _ => 0
                 };
-
-                break;
+                totalVramMB += vram;
             }
         }
         return (gpuName, driverVer, totalVramMB);

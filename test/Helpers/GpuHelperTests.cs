@@ -16,7 +16,9 @@ public class GpuHelperTests
     [Fact]
     public void GetGPUInfo_ShouldReturnName()
     {
-        var (name, _) = GpuHelper.GetGPUInfo();
+        var (name, driverVer, totalVramMB) = GpuHelper.GetGPUInfo();
         Assert.NotNull(name);
+        Assert.NotNull(driverVer);
+        Assert.True(totalVramMB >= 0);
     }
 }
