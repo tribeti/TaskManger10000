@@ -10,7 +10,7 @@ class Program
 {
     private record SystemStats(
         double Cpu,
-        double Gpu,
+        (double UsagePercent, double VramUsedMB) Gpu,
         (double TotalGB, double FreeGB, double UsedPct) Ram,
         (double Download, double Upload) Network,
         (long Ping, int Loss) PingInfo,
@@ -47,7 +47,7 @@ class Program
 
         string cpuName = CpuHelper.GetProcessorCoreName();
         string osName = CpuHelper.GetOSName();
-        var (gpuName, gpuDriver) = GpuHelper.GetGPUInfo();
+        var (gpuName, gpuDriver, gpuVramTotalMB) = GpuHelper.GetGPUInfo();
 
         cpu.WarmUp();
         gpu.WarmUp();
@@ -90,7 +90,7 @@ class Program
 
                     if (_statsDirty && _currentStats is not null)
                     {
-                        RenderStats(layout, _currentStats, cpuName, osName, gpuName, gpuDriver);
+                        RenderStats(layout, _currentStats, cpuName, osName, gpuName, gpuDriver, gpuVramTotalMB);
                         _statsDirty = false;
                         refreshed = true;
                     }
@@ -262,12 +262,12 @@ class Program
         return (changed, false);
     }
 
-    private static void RenderStats(Layout layout, SystemStats stats, string cpuName, string osName, string gpuName, string gpuDriver)
+    private static void RenderStats(Layout layout, SystemStats stats, string cpuName, string osName, string gpuName, string gpuDriver, double gpuVramTotalMB)
     {
         layout["CPU"].Update(CpuPanel.Build(stats.Cpu, cpuName, osName));
         double usedRamGB = stats.Ram.TotalGB * stats.Ram.UsedPct / 100.0;
         layout["RAM"].Update(RamPanel.Build(stats.Ram.UsedPct, usedRamGB, stats.Ram.TotalGB));
-        layout["GPU"].Update(GpuPanel.Build(stats.Gpu, gpuName, gpuDriver));
+        layout["GPU"].Update(GpuPanel.Build(stats.Gpu.UsagePercent, gpuName, gpuDriver, stats.Gpu.VramUsedMB, gpuVramTotalMB));
         layout["Network"].Update(NetworkPanel.Build(stats.Network.Download, stats.Network.Upload, stats.PingInfo.Ping, stats.PingInfo.Loss));
         layout["Disk"].Update(DiskPanel.Build(stats.Drives, stats.Disk));
     }
@@ -328,7 +328,7 @@ class Program
             {
                 _currentStats = new SystemStats(
                     cpu.GetUsage(),
-                    gpu.GetGPUUsage(),
+                    (gpu.GetGPUUsage(), GpuHelper.GetTotalVRamUsage()),
                     RamHelper.GetMemoryStatus(),
                     network.NetworkSpeed(),
                     NetworkHelper.GetPingAndPacketLoss(),
