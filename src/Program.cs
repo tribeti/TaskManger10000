@@ -328,7 +328,7 @@ class Program
             {
                 _currentStats = new SystemStats(
                     cpu.GetUsage(),
-                    (gpu.GetGPUUsage(), gpu.GetVramUsedMB()),
+                    (gpu.GetGPUUsage(), GpuHelper.GetTotalVRamUsage()),
                     RamHelper.GetMemoryStatus(),
                     network.NetworkSpeed(),
                     NetworkHelper.GetPingAndPacketLoss(),

@@ -16,9 +16,7 @@ public static class GpuPanel
         );
         grid.AddRow("Name", gpuName);
         grid.AddRow("Driver Version", driverVer);
-        grid.AddRow("VRAM", TotalVRAM > 0
-            ? $"{UsedVRAM:N0} MB / {TotalVRAM:N0} MB"
-            : "[dim]N/A[/]");
+        grid.AddRow("VRAM", $"{UsedVRAM:N0} MB / {TotalVRAM:N0} MB");
 
         return new Panel(grid)
             .Header("[bold]GPU[/]", Justify.Center)
