@@ -1,5 +1,6 @@
 ﻿using core.Models;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace core.Monitor;
 
@@ -8,6 +9,100 @@ public class ProcessMonitor
     private volatile List<ProcessInfo> _cache = [];
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private Dictionary<int, (TimeSpan Cpu, TimeSpan Timestamp, DateTime StartTime)> _prev = [];
+    private static readonly Dictionary<int, DateTime> _suspendedProcesses = [];
+
+    [Flags]
+    private enum ThreadAccess : int
+    {
+        SUSPEND_RESUME = 0x0002
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr OpenThread(ThreadAccess dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint SuspendThread(IntPtr hThread);
+
+    [DllImport("kernel32.dll")]
+    private static extern int ResumeThread(IntPtr hThread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    public static bool IsSuspended(int pid, DateTime startTime) => _suspendedProcesses.TryGetValue(pid, out var suspendedStart) && suspendedStart == startTime;
+
+    public static bool Suspend(int pid, DateTime startTime)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            bool success = false;
+
+            foreach (ProcessThread thread in process.Threads)
+            {
+                IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) thread.Id);
+                if (hThread != IntPtr.Zero)
+                {
+                    try
+                    {
+                        if (SuspendThread(hThread) != unchecked((uint) -1))
+                            success = true;
+                    }
+                    finally { CloseHandle(hThread); }
+                }
+            }
+
+            if (success)
+                _suspendedProcesses[pid] = startTime;
+            return success;
+        }
+        catch { return false; }
+    }
+
+    public static bool Resume(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            bool success = false;
+
+            foreach (ProcessThread thread in process.Threads)
+            {
+                IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) thread.Id);
+                if (hThread != IntPtr.Zero)
+                {
+                    try
+                    {
+                        int count;
+                        do
+                        { count = ResumeThread(hThread); } while (count > 0);
+                        if (count != -1)
+                            success = true;
+                    }
+                    finally { CloseHandle(hThread); }
+                }
+            }
+
+            if (success)
+                _suspendedProcesses.Remove(pid);
+            return success;
+        }
+        catch { return false; }
+    }
+
+    public static void TogglePause(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            if (IsSuspended(pid, p.StartTime))
+                Resume(pid);
+            else
+                Suspend(pid, p.StartTime);
+        }
+        catch { }
+    }
 
     public void Refresh()
     {
@@ -15,6 +110,16 @@ public class ProcessMonitor
         var procs = Process.GetProcesses();
         var list = new List<ProcessInfo>(procs.Length);
         var current = new Dictionary<int, (TimeSpan, TimeSpan, DateTime)>();
+
+        var activePids = new HashSet<int>(procs.Length);
+        foreach (var p in procs)
+            activePids.Add(p.Id);
+
+        foreach (var key in _suspendedProcesses.Keys.ToList())
+        {
+            if (!activePids.Contains(key))
+                _suspendedProcesses.Remove(key);
+        }
 
         foreach (var p in procs)
         {
@@ -28,9 +133,12 @@ public class ProcessMonitor
                 catch { startTime = null; }
 
                 double cpuPercent = 0;
+                bool isSuspended = false;
 
                 if (startTime is DateTime validStart)
                 {
+                    isSuspended = IsSuspended(p.Id, validStart);
+
                     if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == validStart)
                     {
                         double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
@@ -53,7 +161,8 @@ public class ProcessMonitor
                     Id: p.Id,
                     Name: p.ProcessName,
                     MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: cpuPercent
+                    CpuUsage: cpuPercent,
+                    IsSuspended: isSuspended
                 ));
             }
             catch { }

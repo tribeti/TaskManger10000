@@ -4,5 +4,6 @@ public record ProcessInfo(
     int Id,
     string Name,
     double MemoryUsage,
-    double CpuUsage
+    double CpuUsage,
+    bool IsSuspended = false
 );
