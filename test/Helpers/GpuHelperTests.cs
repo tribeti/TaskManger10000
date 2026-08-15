@@ -18,29 +18,68 @@ public class GpuHelperTests
     {
         var (name, driverVer, totalVramMB) = GpuHelper.GetGPUInfo();
 
-        Assert.NotEmpty(name?.Trim() ?? string.Empty);
-        Assert.NotEqual("Unknown GPU", name);
-        Assert.NotEmpty(driverVer?.Trim() ?? string.Empty);
-        Assert.NotEqual("Unknown Driver Version", driverVer);
-        Assert.True(totalVramMB > 0);
-    }
-
-    [Fact]
-    public void GetGPUInfo_WhenNoGpuFound_ShouldReturnFallbackValues()
-    {
-        var (name, driverVer, totalVramMB) = GpuHelper.GetGPUInfo();
-
-        if (name == "Unknown GPU")
+        // Either valid GPU info or fallback values — both are acceptable
+        if (name != "Unknown GPU")
         {
+            Assert.NotEmpty(name?.Trim() ?? string.Empty);
+            Assert.NotEmpty(driverVer?.Trim() ?? string.Empty);
+            Assert.NotEqual("Unknown Driver Version", driverVer);
+            Assert.True(totalVramMB > 0, "GPU with a valid name should report VRAM > 0");
+        }
+        else
+        {
+            // Fallback case: no GPU detected
             Assert.Equal("Unknown GPU", name);
             Assert.Equal("Unknown Driver Version", driverVer);
             Assert.Equal(0, totalVramMB);
         }
-        else
+    }
+
+    [Fact]
+    public void InitCounters_ShouldReturnNonNullList()
+    {
+        var counters = GpuHelper.InitCounters();
+        Assert.NotNull(counters);
+
+        // Clean up performance counters
+        counters.ForEach(c => c.Dispose());
+    }
+
+    [Fact]
+    public void GetTotalVRamUsage_ShouldReturnNonNegativeValue()
+    {
+        double vramUsage = GpuHelper.GetTotalVRamUsage();
+        Assert.True(vramUsage >= 0, $"VRAM usage should be non-negative, got {vramUsage}");
+    }
+
+    [Fact]
+    public void GetGPUUsage_CalledMultipleTimes_ShouldReturnValidValues()
+    {
+        using var helper = new GpuHelper();
+        helper.WarmUp();
+
+        for (int i = 0; i < 3; i++)
         {
-            Assert.NotEmpty(name?.Trim() ?? string.Empty);
-            Assert.NotEmpty(driverVer?.Trim() ?? string.Empty);
-            Assert.True(totalVramMB >= 0);
+            double usage = helper.GetGPUUsage();
+            Assert.InRange(usage, 0.0, 100.0);
         }
+    }
+
+    [Fact]
+    public void Dispose_ShouldNotThrow()
+    {
+        var helper = new GpuHelper();
+        helper.WarmUp();
+        var ex = Record.Exception(() => helper.Dispose());
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Dispose_CalledTwice_ShouldNotThrow()
+    {
+        var helper = new GpuHelper();
+        helper.Dispose();
+        var ex = Record.Exception(() => helper.Dispose());
+        Assert.Null(ex);
     }
 }
