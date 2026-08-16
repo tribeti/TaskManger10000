@@ -10,6 +10,8 @@ public class ProcessMonitor
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private Dictionary<int, (TimeSpan Cpu, TimeSpan Timestamp, DateTime StartTime)> _prev = [];
     private static readonly Dictionary<int, DateTime> _suspendedProcesses = [];
+    private static readonly Dictionary<(int Pid, DateTime StartTime, int ThreadId), int> _ownedSuspendCounts = [];
+    private static readonly object _suspendLock = new();
 
     [Flags]
     private enum ThreadAccess : int
@@ -30,76 +32,221 @@ public class ProcessMonitor
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr hObject);
 
-    public static bool IsSuspended(int pid, DateTime startTime) => _suspendedProcesses.TryGetValue(pid, out var suspendedStart) && suspendedStart == startTime;
+    public static bool IsSuspended(int pid, DateTime startTime)
+    {
+        lock (_suspendLock)
+        {
+            return _suspendedProcesses.TryGetValue(pid, out var suspendedStart)
+                && suspendedStart == startTime;
+        }
+    }
 
     public static bool Suspend(int pid, DateTime startTime)
     {
-        try
+        lock (_suspendLock)
         {
-            using var process = Process.GetProcessById(pid);
-            bool success = false;
-
-            foreach (ProcessThread thread in process.Threads)
+            try
             {
-                IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) thread.Id);
-                if (hThread != IntPtr.Zero)
+                using var process = Process.GetProcessById(pid);
+                if (process.StartTime != startTime)
+                    return false;
+
+                var suspendedThreads = new List<int>();
+                foreach (ProcessThread thread in process.Threads)
                 {
+                    IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) thread.Id);
+
+                    if (hThread == IntPtr.Zero)
+                    {
+                        RollbackSuspends(pid, startTime, suspendedThreads);
+                        return false;
+                    }
                     try
                     {
-                        if (SuspendThread(hThread) != unchecked((uint) -1))
-                            success = true;
+                        uint previousCount = SuspendThread(hThread);
+                        if (previousCount == unchecked((uint) -1))
+                        {
+                            RollbackSuspends(pid, startTime, suspendedThreads);
+                            return false;
+                        }
+                        suspendedThreads.Add(thread.Id);
                     }
-                    finally { CloseHandle(hThread); }
+                    finally
+                    {
+                        CloseHandle(hThread);
+                    }
                 }
-            }
 
-            if (success)
+                if (suspendedThreads.Count == 0)
+                    return false;
+
+                foreach (int threadId in suspendedThreads)
+                {
+                    var key = (pid, startTime, threadId);
+
+                    _ownedSuspendCounts.TryGetValue(key, out int count);
+                    _ownedSuspendCounts[key] = count + 1;
+                }
                 _suspendedProcesses[pid] = startTime;
-            return success;
+
+                return true;
+            }
+            catch { return false; }
         }
-        catch { return false; }
     }
 
     public static bool Resume(int pid)
     {
-        try
+        lock (_suspendLock)
         {
-            using var process = Process.GetProcessById(pid);
-            bool success = false;
-
-            foreach (ProcessThread thread in process.Threads)
+            try
             {
-                IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) thread.Id);
-                if (hThread != IntPtr.Zero)
+                if (!_suspendedProcesses.TryGetValue(
+                        pid,
+                        out var startTime))
                 {
+                    return false;
+                }
+
+                using var process = Process.GetProcessById(pid);
+                if (process.StartTime != startTime)
+                {
+                    RemoveOwnedSuspendState(pid, startTime);
+                    return false;
+                }
+
+                var ownedThreads = _ownedSuspendCounts
+                    .Where(x =>
+                        x.Key.Pid == pid &&
+                        x.Key.StartTime == startTime &&
+                        x.Value > 0)
+                    .Select(x => (x.Key.ThreadId, Count: x.Value))
+                    .ToList();
+
+                if (ownedThreads.Count == 0)
+                {
+                    _suspendedProcesses.Remove(pid);
+                    return false;
+                }
+
+                bool allSuccessful = true;
+
+                foreach (var owned in ownedThreads)
+                {
+                    IntPtr hThread = OpenThread(
+                        ThreadAccess.SUSPEND_RESUME,
+                        false,
+                        (uint) owned.ThreadId);
+
+                    if (hThread == IntPtr.Zero)
+                    {
+                        allSuccessful = false;
+                        continue;
+                    }
+
                     try
                     {
-                        int count;
-                        do
-                        { count = ResumeThread(hThread); } while (count > 0);
-                        if (count != -1)
-                            success = true;
+                        int remaining = owned.Count;
+
+                        while (remaining > 0)
+                        {
+                            int previousCount = ResumeThread(hThread);
+
+                            // -1 = failure.
+                            if (previousCount == -1)
+                            {
+                                allSuccessful = false;
+                                break;
+                            }
+
+                            // 0 = thread was not suspended.
+                            // Do NOT treat this as one of our resumes.
+                            if (previousCount == 0)
+                            {
+                                allSuccessful = false;
+                                break;
+                            }
+
+                            // Exactly one suspend count owned by this
+                            // monitor has been removed.
+                            remaining--;
+                        }
+
+                        var key = (pid, startTime, owned.ThreadId);
+                        if (remaining == 0)
+                        {
+                            _ownedSuspendCounts.Remove(key);
+                        }
+                        else
+                        {
+                            _ownedSuspendCounts[key] = remaining;
+                        }
                     }
-                    finally { CloseHandle(hThread); }
+                    finally
+                    {
+                        CloseHandle(hThread);
+                    }
+                }
+
+                bool stillOwned = _ownedSuspendCounts.Keys.Any(x => x.Pid == pid && x.StartTime == startTime);
+                if (!stillOwned)
+                    _suspendedProcesses.Remove(pid);
+
+                return allSuccessful && !stillOwned;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    private static void RollbackSuspends(int pid, DateTime startTime, List<int> suspendedThreads)
+    {
+        foreach (int threadId in suspendedThreads)
+        {
+            IntPtr hThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint) threadId);
+            if (hThread == IntPtr.Zero)
+                continue;
+
+            try
+            {
+                int previousCount = ResumeThread(hThread);
+                if (previousCount > 0)
+                {
+                    var key = (pid, startTime, threadId);
+                    _ownedSuspendCounts.Remove(key);
                 }
             }
-
-            if (success)
-                _suspendedProcesses.Remove(pid);
-            return success;
+            finally { CloseHandle(hThread); }
         }
-        catch { return false; }
+    }
+
+    private static void RemoveOwnedSuspendState(int pid, DateTime startTime)
+    {
+        _suspendedProcesses.Remove(pid);
+        foreach (var key in _ownedSuspendCounts.Keys
+                    .Where(x => x.Pid == pid && x.StartTime == startTime)
+                    .ToList())
+        {
+            _ownedSuspendCounts.Remove(key);
+        }
     }
 
     public static void TogglePause(int pid)
     {
+        if (pid == Environment.ProcessId)
+            return;
+
         try
         {
-            using var p = Process.GetProcessById(pid);
-            if (IsSuspended(pid, p.StartTime))
+            using var process = Process.GetProcessById(pid);
+            var startTime = process.StartTime;
+
+            if (IsSuspended(pid, startTime))
                 Resume(pid);
             else
-                Suspend(pid, p.StartTime);
+                Suspend(pid, startTime);
         }
         catch { }
     }
@@ -110,15 +257,24 @@ public class ProcessMonitor
         var procs = Process.GetProcesses();
         var list = new List<ProcessInfo>(procs.Length);
         var current = new Dictionary<int, (TimeSpan, TimeSpan, DateTime)>();
-
         var activePids = new HashSet<int>(procs.Length);
+
         foreach (var p in procs)
             activePids.Add(p.Id);
 
-        foreach (var key in _suspendedProcesses.Keys.ToList())
+        lock (_suspendLock)
         {
-            if (!activePids.Contains(key))
-                _suspendedProcesses.Remove(key);
+            foreach (var key in _suspendedProcesses.Keys.ToList())
+            {
+                if (!activePids.Contains(key))
+                    _suspendedProcesses.Remove(key);
+            }
+
+            foreach (var key in _ownedSuspendCounts.Keys.ToList())
+            {
+                if (!activePids.Contains(key.Pid))
+                    _ownedSuspendCounts.Remove(key);
+            }
         }
 
         foreach (var p in procs)
@@ -126,11 +282,16 @@ public class ProcessMonitor
             try
             {
                 var cpuTime = p.TotalProcessorTime;
-
                 DateTime? startTime;
+
                 try
-                { startTime = p.StartTime; }
-                catch { startTime = null; }
+                {
+                    startTime = p.StartTime;
+                }
+                catch
+                {
+                    startTime = null;
+                }
 
                 double cpuPercent = 0;
                 bool isSuspended = false;
@@ -146,7 +307,7 @@ public class ProcessMonitor
 
                         if (elapsedMs > 0 && usedMs >= 0)
                         {
-                            var raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                            double raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
                             if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
                             {
                                 cpuPercent = raw;
@@ -178,8 +339,8 @@ public class ProcessMonitor
         var snapshot = _cache;
 
         IEnumerable<ProcessInfo> result = string.IsNullOrEmpty(query)
-            ? snapshot
-            : snapshot.Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
+                ? snapshot
+                : snapshot.Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
 
         return sort switch
         {
