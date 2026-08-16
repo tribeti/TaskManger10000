@@ -1,4 +1,4 @@
-﻿using core.Models;
+using core.Models;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -140,6 +140,7 @@ public class ProcessMonitor
 
                     if (hThread == IntPtr.Zero)
                     {
+                        _ownedSuspendCounts.Remove((pid, startTime, owned.ThreadId));
                         allSuccessful = false;
                         continue;
                     }
@@ -160,10 +161,10 @@ public class ProcessMonitor
                             }
 
                             // 0 = thread was not suspended.
-                            // Do NOT treat this as one of our resumes.
                             if (previousCount == 0)
                             {
                                 allSuccessful = false;
+                                remaining = 0;
                                 break;
                             }
 
@@ -188,7 +189,7 @@ public class ProcessMonitor
                     }
                 }
 
-                bool stillOwned = _ownedSuspendCounts.Keys.Any(x => x.Pid == pid && x.StartTime == startTime);
+                bool stillOwned = _ownedSuspendCounts.Any(x => x.Key.Pid == pid && x.Key.StartTime == startTime && x.Value > 0);
                 if (!stillOwned)
                     _suspendedProcesses.Remove(pid);
 
@@ -215,7 +216,11 @@ public class ProcessMonitor
                 if (previousCount > 0)
                 {
                     var key = (pid, startTime, threadId);
-                    _ownedSuspendCounts.Remove(key);
+                    _ownedSuspendCounts.TryGetValue(key, out int count);
+                    if (count <= 1)
+                        _ownedSuspendCounts.Remove(key);
+                    else
+                        _ownedSuspendCounts[key] = count - 1;
                 }
             }
             finally { CloseHandle(hThread); }
