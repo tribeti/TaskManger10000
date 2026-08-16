@@ -1,4 +1,4 @@
-﻿using core.Helpers;
+using core.Helpers;
 using core.Models;
 using core.Monitor;
 using Spectre.Console;
@@ -146,7 +146,7 @@ class Program
             new Layout("Disk").Ratio(2));
 
         layout["Intro"].Update(
-            new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
+            new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [cyan]P[/]: Pause/Resume | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
                 .Border(BoxBorder.None).Collapse());
 
         return layout;
@@ -230,6 +230,12 @@ class Program
                         changed = true;
                         break;
 
+                    case ConsoleKey.P when processes.Count > 0:
+                        var targetP = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
+                        ProcessMonitor.TogglePause(targetP.Id);
+                        changed = true;
+                        break;
+
                     case ConsoleKey.S:
                         state.SortMode = state.SortMode switch
                         {
@@ -295,12 +301,14 @@ class Program
             var p = processes[i];
             bool isSelected = i == state.SelectedIndex;
             string safeName = Markup.Escape(p.Name);
+            string pausedTag = p.IsSuspended ? " [red](Paused)[/]" : "";
 
             if (isSelected)
             {
+                string selectedName = p.IsSuspended ? $"{safeName} (Paused)" : safeName;
                 procTable.AddRow(
                     $"[black on white]{p.Id}[/]",
-                    $"[black on white]{safeName}[/]",
+                    $"[black on white]{selectedName}[/]",
                     $"[black on white]{p.MemoryUsage:F2}[/]",
                     $"[black on white]{p.CpuUsage:F1}%[/]"
                 );
@@ -312,7 +320,7 @@ class Program
 
                 procTable.AddRow(
                     p.Id.ToString(),
-                    safeName,
+                    $"{safeName}{pausedTag}",
                     $"[{memColor}]{p.MemoryUsage:F2}[/]",
                     $"[{cpuColor}]{p.CpuUsage:F1}%[/]"
                 );
