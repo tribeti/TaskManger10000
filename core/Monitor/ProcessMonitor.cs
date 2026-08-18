@@ -1,3 +1,4 @@
+using core.Helpers;
 using core.Models;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -259,10 +260,10 @@ public class ProcessMonitor
     public void Refresh()
     {
         var now = _clock.Elapsed;
-        var procs = Process.GetProcesses();
-        var list = new List<ProcessInfo>(procs.Length);
+        var procs = NativeProcessManager.GetAllProcesses();
+        var list = new List<ProcessInfo>(procs.Count);
         var current = new Dictionary<int, (TimeSpan, TimeSpan, DateTime)>();
-        var activePids = new HashSet<int>(procs.Length);
+        var activePids = new HashSet<int>(procs.Count);
 
         foreach (var p in procs)
             activePids.Add(p.Id);
@@ -284,55 +285,38 @@ public class ProcessMonitor
 
         foreach (var p in procs)
         {
-            try
+            double cpuPercent = 0;
+            bool isSuspended = false;
+
+            if (p.StartTime is DateTime validStart)
             {
-                var cpuTime = p.TotalProcessorTime;
-                DateTime? startTime;
+                isSuspended = IsSuspended(p.Id, validStart);
 
-                try
+                if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == validStart)
                 {
-                    startTime = p.StartTime;
-                }
-                catch
-                {
-                    startTime = null;
-                }
+                    double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
+                    double usedMs = (p.CpuTime - old.Cpu).TotalMilliseconds;
 
-                double cpuPercent = 0;
-                bool isSuspended = false;
-
-                if (startTime is DateTime validStart)
-                {
-                    isSuspended = IsSuspended(p.Id, validStart);
-
-                    if (_prev.TryGetValue(p.Id, out var old) && old.StartTime == validStart)
+                    if (elapsedMs > 0 && usedMs >= 0)
                     {
-                        double elapsedMs = (now - old.Timestamp).TotalMilliseconds;
-                        double usedMs = (cpuTime - old.Cpu).TotalMilliseconds;
-
-                        if (elapsedMs > 0 && usedMs >= 0)
+                        double raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
+                        if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
                         {
-                            double raw = usedMs / (Environment.ProcessorCount * elapsedMs) * 100;
-                            if (!double.IsNaN(raw) && !double.IsInfinity(raw) && raw >= 0)
-                            {
-                                cpuPercent = raw;
-                            }
+                            cpuPercent = raw;
                         }
                     }
-
-                    current[p.Id] = (cpuTime, now, validStart);
                 }
 
-                list.Add(new ProcessInfo(
-                    Id: p.Id,
-                    Name: p.ProcessName,
-                    MemoryUsage: p.WorkingSet64 / 1_048_576.0,
-                    CpuUsage: cpuPercent,
-                    IsSuspended: isSuspended
-                ));
+                current[p.Id] = (p.CpuTime, now, validStart);
             }
-            catch { }
-            finally { p.Dispose(); }
+
+            list.Add(new ProcessInfo(
+                Id: p.Id,
+                Name: p.Name,
+                MemoryUsage: p.WorkingSetBytes / 1_048_576.0,
+                CpuUsage: cpuPercent,
+                IsSuspended: isSuspended
+            ));
         }
 
         _prev = current;
