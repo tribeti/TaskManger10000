@@ -38,7 +38,10 @@ public class GpuHelper : IDisposable
         }
     }
 
-    public void WarmUp() => _counters.ForEach(c => { try { c.NextValue(); } catch { } });
+    public void WarmUp()
+    {
+        _counters.ForEach(c => { try { c.NextValue(); } catch { } });
+    }
 
     public double GetGPUUsage()
     {
@@ -70,14 +73,15 @@ public class GpuHelper : IDisposable
     }
 
     // not tested on multi-GPU systems, but should return the first GPU's info (maybe igpu idk)
-    public static (string gpuName, string driverVer) GetGPUInfo()
+    public static (string gpuName, string driverVer, double totalVramMB) GetGPUInfo()
     {
-        string gpuName = "Unknown GPU";
-        string driverVer = "Unknown Driver Version";
+        const string unknownName = "Unknown GPU";
+        const string unknownDriver = "Unknown Driver Version";
         const string basePath = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+
         using var baseKey = Registry.LocalMachine.OpenSubKey(basePath);
         if (baseKey is null)
-            return (gpuName, driverVer);
+            return (unknownName, unknownDriver, 0);
 
         foreach (var subKeyName in baseKey.GetSubKeyNames())
         {
@@ -85,21 +89,59 @@ public class GpuHelper : IDisposable
                 continue;
 
             using var subKey = baseKey.OpenSubKey(subKeyName);
-            if (subKey is null)
+            var name = subKey?.GetValue("DriverDesc")?.ToString();
+            if (string.IsNullOrEmpty(name))
                 continue;
 
-            var name = subKey.GetValue("DriverDesc")?.ToString();
-            var driver = subKey.GetValue("DriverVersion")?.ToString();
+            var driverVer = subKey!.GetValue("DriverVersion")?.ToString() ?? unknownDriver;
+            var totalVramMB = GetVideoMem(subKey);
 
-            if (!string.IsNullOrEmpty(name))
-            {
-                gpuName = name;
-                driverVer = driver ?? "Unknown Driver Version";
-                break;
-            }
+            return (name, driverVer, totalVramMB);
         }
-        return (gpuName, driverVer);
+
+        return (unknownName, unknownDriver, 0);
     }
+
+    // Source - https://stackoverflow.com/a/75205056
+    // Posted by colin lamarre
+    // Retrieved 2026-08-15, License - CC BY-SA 4.0
+    private static double GetVideoMem(RegistryKey subKey)
+    {
+        try
+        {
+            object? vram = subKey.GetValue("HardwareInformation.qwMemorySize");
+            if (vram is not null)
+                // byte to MB
+                return (double) (long) vram / 1024.0 / 1024.0;
+        }
+        catch { }
+        return 0;
+    }
+
+    // Source - https://stackoverflow.com/a/79422972
+    // Posted by BrainSlugs83, modified by community. See post 'Timeline' for change history
+    // Retrieved 2026-08-15, License - CC BY-SA 4.0
+    private static readonly Lazy<List<Func<long>>> TotalVramUsageCounters = new
+    (
+        () =>
+        {
+            try
+            {
+                var cat = new PerformanceCounterCategory("GPU Adapter Memory");
+                return cat.GetInstanceNames().SelectMany(cat.GetCounters)
+                        .Where(static c => c?.CounterName?.EndsWith("Usage") == true)
+                        .Select(static c => new Func<long>(() => c.NextSample().RawValue))
+                        .ToList();
+            }
+            catch
+            {
+                return [];
+            }
+        },
+        LazyThreadSafetyMode.ExecutionAndPublication
+    );
+
+    public static double GetTotalVRamUsage() => TotalVramUsageCounters.Value.Select(x => x()).Sum() / 1024.0 / 1024.0;
 
     public void Dispose()
     {
@@ -108,5 +150,6 @@ public class GpuHelper : IDisposable
         _counters.ForEach(c => c.Dispose());
         _counters.Clear();
         _disposed = true;
+        GC.SuppressFinalize(this);
     }
 }

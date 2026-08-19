@@ -1,4 +1,4 @@
-﻿using core.Helpers;
+using core.Helpers;
 using core.Models;
 using core.Monitor;
 using Spectre.Console;
@@ -10,7 +10,7 @@ class Program
 {
     private record SystemStats(
         double Cpu,
-        double Gpu,
+        (double UsagePercent, double VramUsedMB) Gpu,
         (double TotalGB, double FreeGB, double UsedPct) Ram,
         (double Download, double Upload) Network,
         (long Ping, int Loss) PingInfo,
@@ -47,7 +47,7 @@ class Program
 
         string cpuName = CpuHelper.GetProcessorCoreName();
         string osName = CpuHelper.GetOSName();
-        var (gpuName, gpuDriver) = GpuHelper.GetGPUInfo();
+        var (gpuName, gpuDriver, gpuVramTotalMB) = GpuHelper.GetGPUInfo();
 
         cpu.WarmUp();
         gpu.WarmUp();
@@ -61,6 +61,7 @@ class Program
         procTable.AddColumn(new TableColumn("[bold]PID[/]"));
         procTable.AddColumn(new TableColumn("[bold]Name[/]"));
         procTable.AddColumn(new TableColumn("[bold]Memory (MB)[/]").Alignment(Justify.Center));
+        procTable.AddColumn(new TableColumn("[bold]CPU Usage[/]").Alignment(Justify.Center));
 
         var procPanel = new Panel(procTable).Expand();
         layout["Table"].Update(procPanel);
@@ -80,7 +81,7 @@ class Program
                 while (true)
                 {
                     int pageSize = CalculatePageSize();
-                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, procMonitor, pageSize);
+                    var (inputChanged, shouldExit) = HandleInput(viewState, filtered, pageSize);
 
                     if (shouldExit)
                         break;
@@ -89,7 +90,7 @@ class Program
 
                     if (_statsDirty && _currentStats is not null)
                     {
-                        RenderStats(layout, _currentStats, cpuName, osName, gpuName, gpuDriver);
+                        RenderStats(layout, _currentStats, cpuName, osName, gpuName, gpuDriver, gpuVramTotalMB);
                         _statsDirty = false;
                         refreshed = true;
                     }
@@ -109,7 +110,7 @@ class Program
                             viewState.ScrollOffset = Math.Clamp(viewState.ScrollOffset, 0, Math.Max(0, filtered.Count - pageSize));
                         }
 
-                        RenderProcesses(layout, procTable, filtered, viewState, pageSize);
+                        RenderProcesses(procTable, filtered, viewState, pageSize);
                         _procDirty = false;
                         refreshed = true;
                     }
@@ -145,7 +146,7 @@ class Program
             new Layout("Disk").Ratio(2));
 
         layout["Intro"].Update(
-            new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
+            new Panel("[green]K[/]: Kill | [green]Shift+K[/]: Kill All | [cyan]P[/]: Pause/Resume | [blue]S[/]: Sort | [yellow]F[/]: Find | [red]ESC[/]: Clear | [red]Q[/]: Quit")
                 .Border(BoxBorder.None).Collapse());
 
         return layout;
@@ -167,7 +168,7 @@ class Program
         return _cachedPageSize;
     }
 
-    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, ProcessMonitor procMonitor, int pageSize)
+    private static (bool Changed, bool ShouldExit) HandleInput(ViewState state, List<ProcessInfo> processes, int pageSize)
     {
         bool changed = false;
         while (Console.KeyAvailable)
@@ -223,16 +224,23 @@ class Program
                     case ConsoleKey.K when processes.Count > 0:
                         var target = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
                         if (ki.Modifiers.HasFlag(ConsoleModifiers.Shift))
-                            procMonitor.KillAllByName(target.Name);
+                            ProcessMonitor.KillAllByName(target.Name);
                         else
-                            procMonitor.Kill(target.Id);
+                            ProcessMonitor.Kill(target.Id);
+                        changed = true;
+                        break;
+
+                    case ConsoleKey.P when processes.Count > 0:
+                        var targetP = processes[Math.Min(state.SelectedIndex, processes.Count - 1)];
+                        ProcessMonitor.TogglePause(targetP.Id);
                         changed = true;
                         break;
 
                     case ConsoleKey.S:
                         state.SortMode = state.SortMode switch
                         {
-                            SortMode.MemoryDesc => SortMode.NameAsc,
+                            SortMode.MemoryDesc => SortMode.CpuDesc,
+                            SortMode.CpuDesc => SortMode.NameAsc,
                             _ => SortMode.MemoryDesc
                         };
                         changed = true;
@@ -260,17 +268,17 @@ class Program
         return (changed, false);
     }
 
-    private static void RenderStats(Layout layout, SystemStats stats, string cpuName, string osName, string gpuName, string gpuDriver)
+    private static void RenderStats(Layout layout, SystemStats stats, string cpuName, string osName, string gpuName, string gpuDriver, double gpuVramTotalMB)
     {
         layout["CPU"].Update(CpuPanel.Build(stats.Cpu, cpuName, osName));
         double usedRamGB = stats.Ram.TotalGB * stats.Ram.UsedPct / 100.0;
         layout["RAM"].Update(RamPanel.Build(stats.Ram.UsedPct, usedRamGB, stats.Ram.TotalGB));
-        layout["GPU"].Update(GpuPanel.Build(stats.Gpu, gpuName, gpuDriver));
+        layout["GPU"].Update(GpuPanel.Build(stats.Gpu.UsagePercent, gpuName, gpuDriver, stats.Gpu.VramUsedMB, gpuVramTotalMB));
         layout["Network"].Update(NetworkPanel.Build(stats.Network.Download, stats.Network.Upload, stats.PingInfo.Ping, stats.PingInfo.Loss));
         layout["Disk"].Update(DiskPanel.Build(stats.Drives, stats.Disk));
     }
 
-    private static void RenderProcesses(Layout layout, Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
+    private static void RenderProcesses(Table procTable, List<ProcessInfo> processes, ViewState state, int pageSize)
     {
         procTable.Rows.Clear();
 
@@ -293,22 +301,28 @@ class Program
             var p = processes[i];
             bool isSelected = i == state.SelectedIndex;
             string safeName = Markup.Escape(p.Name);
+            string pausedTag = p.IsSuspended ? " [red](Paused)[/]" : "";
 
             if (isSelected)
             {
+                string selectedName = p.IsSuspended ? $"{safeName} (Paused)" : safeName;
                 procTable.AddRow(
                     $"[black on white]{p.Id}[/]",
-                    $"[black on white]{safeName}[/]",
-                    $"[black on white]{p.MemoryUsage:N2}[/]"
+                    $"[black on white]{selectedName}[/]",
+                    $"[black on white]{p.MemoryUsage:F2}[/]",
+                    $"[black on white]{p.CpuUsage:F1}%[/]"
                 );
             }
             else
             {
                 string memColor = p.MemoryUsage > 500 ? "red" : p.MemoryUsage > 300 ? "yellow" : "green";
+                string cpuColor = p.CpuUsage > 25 ? "red" : p.CpuUsage > 10 ? "yellow" : "green";
+
                 procTable.AddRow(
                     p.Id.ToString(),
-                    safeName,
-                    $"[{memColor}]{p.MemoryUsage:N2}[/]"
+                    $"{safeName}{pausedTag}",
+                    $"[{memColor}]{p.MemoryUsage:F2}[/]",
+                    $"[{cpuColor}]{p.CpuUsage:F1}%[/]"
                 );
             }
         }
@@ -322,7 +336,7 @@ class Program
             {
                 _currentStats = new SystemStats(
                     cpu.GetUsage(),
-                    gpu.GetGPUUsage(),
+                    (gpu.GetGPUUsage(), GpuHelper.GetTotalVRamUsage()),
                     RamHelper.GetMemoryStatus(),
                     network.NetworkSpeed(),
                     NetworkHelper.GetPingAndPacketLoss(),
