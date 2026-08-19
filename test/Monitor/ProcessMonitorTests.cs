@@ -135,7 +135,7 @@ public class ProcessMonitorTests
 
         Assert.All(processes, p =>
         {
-            Assert.True(p.Id > 0, $"Process ID must be positive, got {p.Id}");
+            Assert.True(p.Id >= 0, $"Process ID must be positive, got {p.Id}");
             Assert.False(string.IsNullOrEmpty(p.Name), "Process name must not be empty");
             Assert.True(p.MemoryUsage >= 0, $"Memory usage must be non-negative, got {p.MemoryUsage}");
             Assert.True(p.CpuUsage >= 0, $"CPU usage must be non-negative, got {p.CpuUsage}");

@@ -5,14 +5,14 @@ using System.Runtime.InteropServices;
 
 namespace core.Monitor;
 
-public class ProcessMonitor
+public partial class ProcessMonitor
 {
     private volatile List<ProcessInfo> _cache = [];
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private Dictionary<int, (TimeSpan Cpu, TimeSpan Timestamp, DateTime StartTime)> _prev = [];
     private static readonly Dictionary<int, DateTime> _suspendedProcesses = [];
     private static readonly Dictionary<(int Pid, DateTime StartTime, int ThreadId), int> _ownedSuspendCounts = [];
-    private static readonly object _suspendLock = new();
+    private static readonly Lock _suspendLock = new();
 
     [Flags]
     private enum ThreadAccess : int
@@ -20,18 +20,18 @@ public class ProcessMonitor
         SUSPEND_RESUME = 0x0002
     }
 
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr OpenThread(ThreadAccess dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr OpenThread(ThreadAccess dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwThreadId);
 
-    [DllImport("kernel32.dll")]
-    private static extern uint SuspendThread(IntPtr hThread);
+    [LibraryImport("kernel32.dll")]
+    private static partial uint SuspendThread(IntPtr hThread);
 
-    [DllImport("kernel32.dll")]
-    private static extern int ResumeThread(IntPtr hThread);
+    [LibraryImport("kernel32.dll")]
+    private static partial int ResumeThread(IntPtr hThread);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    private static partial bool CloseHandle(IntPtr hObject);
 
     public static bool IsSuspended(int pid, DateTime startTime)
     {
@@ -132,23 +132,23 @@ public class ProcessMonitor
 
                 bool allSuccessful = true;
 
-                foreach (var owned in ownedThreads)
+                foreach (var (ThreadId, Count) in ownedThreads)
                 {
                     IntPtr hThread = OpenThread(
                         ThreadAccess.SUSPEND_RESUME,
                         false,
-                        (uint) owned.ThreadId);
+                        (uint) ThreadId);
 
                     if (hThread == IntPtr.Zero)
                     {
-                        _ownedSuspendCounts.Remove((pid, startTime, owned.ThreadId));
+                        _ownedSuspendCounts.Remove((pid, startTime, ThreadId));
                         allSuccessful = false;
                         continue;
                     }
 
                     try
                     {
-                        int remaining = owned.Count;
+                        int remaining = Count;
 
                         while (remaining > 0)
                         {
@@ -174,7 +174,7 @@ public class ProcessMonitor
                             remaining--;
                         }
 
-                        var key = (pid, startTime, owned.ThreadId);
+                        var key = (pid, startTime, ThreadId);
                         if (remaining == 0)
                         {
                             _ownedSuspendCounts.Remove(key);

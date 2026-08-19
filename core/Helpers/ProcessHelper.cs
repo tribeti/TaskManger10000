@@ -11,14 +11,14 @@ public class NativeProcessSnapshot
     public DateTime? StartTime { get; set; }
 }
 
-public static class NativeProcessManager
+public static partial class NativeProcessManager
 {
     private const uint SystemProcessInformation = 5;
     private const uint STATUS_SUCCESS = 0x00000000;
     private const uint STATUS_INFO_LENGTH_MISMATCH = 0xC0000004;
 
-    [DllImport("ntdll.dll")]
-    private static extern uint NtQuerySystemInformation(
+    [LibraryImport("ntdll.dll",StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint NtQuerySystemInformation(
         uint SystemInformationClass,
         IntPtr SystemInformation,
         uint SystemInformationLength,

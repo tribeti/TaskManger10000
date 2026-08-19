@@ -34,13 +34,13 @@ public class CpuHelper : IDisposable
 
     public static string GetOSName()
     {
-        string productName = "";
-        string displayVersion = "";
+        string? productName = "";
+        string? displayVersion = "";
 
-        using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+        using (RegistryKey? key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
         {
-            productName = key.GetValue("ProductName")?.ToString();
-            displayVersion = key.GetValue("DisplayVersion")?.ToString();
+            productName = key?.GetValue("ProductName")?.ToString();
+            displayVersion = key?.GetValue("DisplayVersion")?.ToString();
         }
 
         return productName + " " + displayVersion;
@@ -57,5 +57,6 @@ public class CpuHelper : IDisposable
             return;
         _totalCounter.Dispose();
         _disposed = true;
+        GC.SuppressFinalize(this);
     }
 }
