@@ -46,6 +46,41 @@ public class CpuHelper : IDisposable
         return productName + " " + displayVersion;
     }
 
+    public static (string MainName, string MainVer, string BIOSVer) GetMainboardInfo()
+    {
+        const string BiosKeyPath = @"HARDWARE\DESCRIPTION\System\BIOS";
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(BiosKeyPath);
+            if (key is null)
+            {
+                return ("Unknown", "Unknown", "Unknown");
+            }
+
+            static string ReadOrUnknown(RegistryKey k, string name)
+            {
+                try
+                {
+                    return k.GetValue(name)?.ToString()?.Trim() ?? "Unknown";
+                }
+                catch
+                {
+                    return "Unknown";
+                }
+            }
+
+            var baseProd = ReadOrUnknown(key, "BaseBoardProduct");
+            var baseVer = ReadOrUnknown(key, "BaseBoardVersion");
+            var biosVer = ReadOrUnknown(key, "BIOSVersion");
+
+            return (baseProd, baseVer, biosVer);
+        }
+        catch
+        {
+            return ("Unknown", "Unknown", "Unknown");
+        }
+    }
+
     // Source - https://stackoverflow.com/a/66459322
     // Posted by Steven Rands
     // Retrieved 2026-02-28, License - CC BY-SA 4.0
