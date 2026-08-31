@@ -125,8 +125,8 @@ class Program
     {
         var layout = new Layout("Root")
             .SplitRows(
-                new Layout("Stat").Ratio(2),
-                new Layout("Process").Ratio(4),
+                new Layout("Stat").Ratio(3).MinimumSize(10),
+                new Layout("Process").Ratio(5),
                 new Layout("Intro").Size(1));
 
         layout["Stat"].SplitColumns(
