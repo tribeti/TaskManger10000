@@ -23,9 +23,10 @@ public static class CpuPanel
         grid.AddRow("OS Version", $"[bold]{Markup.Escape(CpuHelper.GetOSName())}[/]");
         // get uptime
         grid.AddRow("Uptime", $"[bold]{CpuHelper.GetUptime():dd\\.hh\\:mm\\:ss}[/]");
-        (string MainName, string MainVer, string BIOSVer) = CpuHelper.GetMainboardInfo();
-        grid.AddRow("Mainboard", $"[bold]{MainName + " " + MainVer}[/]");
-        grid.AddRow("BIOS", $"[bold]{BIOSVer}[/]");
+        // get mainboard and bios info
+        (string? MainName, string? MainVer, string? BIOSVer) = CpuHelper.GetMainboardInfo();
+        grid.AddRow("Mainboard", $"[bold]{Markup.Escape(MainName + " " + MainVer)}[/]");
+        grid.AddRow("BIOS", $"[bold]{Markup.Escape(BIOSVer ?? "Unknown")}[/]");
 
         return new Panel(grid)
             .Header("[bold]CPU[/]", Justify.Center)
